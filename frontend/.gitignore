@@ -1,0 +1,11 @@
+# Code Review Workbench (CRW)
+
+# Frontend
+node_modules/
+dist/
+
+# Docker
+.docker/
+
+# Misc
+*.log
