@@ -3,7 +3,7 @@ Agent 基类与上下文
 
 定义所有审查 Agent 的抽象接口和运行上下文。
 - BaseReviewAgent: 抽象基类，所有 Agent 继承此类
-- AgentContext: Agent 运行时上下文，包含 LLM 和 AST 引擎实例
+- AgentContext: Agent 运行时上下文，包含 LLM、AST 引擎和记忆上下文
 """
 
 from abc import ABC, abstractmethod
@@ -17,11 +17,12 @@ from app.integrations.llm import LLMProvider
 class AgentContext:
     """Agent 运行时上下文。
 
-    包含 LLM 提供者、AST 引擎和配置参数。
+    包含 LLM 提供者、AST 引擎、记忆上下文和配置参数。
     """
 
     llm: type[LLMProvider] = LLMProvider
     ast_engine: ASTEngine = field(default_factory=ASTEngine)
+    memory_context: str = ""
     config: dict = field(default_factory=dict)
 
 
@@ -44,14 +45,11 @@ class BaseReviewAgent(ABC):
     async def review(self, parsed_files: list[ParsedFile]) -> list[dict]:
         """执行审查，返回问题列表。
 
-        Args:
-            parsed_files: ASTEngine 解析后的文件列表
-
         Returns:
             list[dict]: 每个元素格式为
                 {
                     "agent_type": str,
-                    "severity": str,      # critical/high/medium/low/info
+                    "severity": str,
                     "file_path": str,
                     "line_start": int,
                     "line_end": int,
@@ -75,25 +73,26 @@ class BaseReviewAgent(ABC):
 
         Args:
             prompt: 分析提示词
-            code_context: 代码上下文（被分析的代码内容）
-            use_reasoning: True 使用 GLM-5.2（推理），False 使用本地模型（工具）
+            code_context: 代码上下文
+            use_reasoning: True 使用推理模型，False 使用本地模型
 
         Returns:
             LLM 响应的文本内容
         """
+        system_content = (
+            "You are a code review agent. "
+            "Analyze the provided code and return results in valid JSON format. "
+            "Each finding should include: severity, category, title, "
+            "description, suggestion, line_start, line_end."
+        )
+
+        memory_ctx = self.context.memory_context
+        if memory_ctx:
+            system_content += "\n\n" + memory_ctx
+
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a code review agent. "
-                    "Analyze the provided code and return results in valid JSON format. "
-                    "Each finding should include: severity, category, title, description, suggestion, line_start, line_end."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"{prompt}\n\n```\n{code_context}\n```",
-            },
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": f"{prompt}\n\n```\n{code_context}\n```"},
         ]
 
         if use_reasoning:
