@@ -2,7 +2,7 @@
 AST 解析引擎集成
 
 基于 Tree-sitter 的多语言代码解析引擎。
-- 第一阶段仅支持 Python，后续扩展 Go/TS/JS/Java。
+- 支持 Python / Go / TypeScript / JavaScript / Java。
 - 提供 ParsedFile 和 CodeIssue 数据结构。
 """
 
@@ -45,8 +45,22 @@ class ParsedFile:
 # Language Support
 # ============================================================
 
+# 语言名 → Tree-sitter language module attribute name
 SUPPORTED_LANGUAGES: dict[str, str] = {
     "python": "python",
+    "go": "go",
+    "typescript": "typescript",
+    "javascript": "javascript",
+    "java": "java",
+}
+
+# Tree-sitter 包名 → 语言名映射（用于懒加载）
+_LANGUAGE_PACKAGES: dict[str, str] = {
+    "python": "tree_sitter_python",
+    "go": "tree_sitter_go",
+    "typescript": "tree_sitter_typescript",
+    "javascript": "tree_sitter_javascript",
+    "java": "tree_sitter_java",
 }
 
 # 文件扩展名 → 语言名映射
@@ -94,33 +108,76 @@ class ASTEngine:
 
     def __init__(self):
         self._parsers: dict[str, Any] = {}  # language -> Parser
+        self._languages: dict[str, Any] = {}  # language -> tree_sitter.Language object
 
-    def _get_parser(self, language: str):
-        """获取或缓存 Tree-sitter Parser。
+    @staticmethod
+    def _load_language_module(language: str) -> Any:
+        """Dynamically load a tree-sitter language package.
+
+        Uses a mapping from language name to Python package name.
 
         Args:
-            language: 语言名（仅 'python' 在第一阶段被支持）
+            language: Language name (python/go/typescript/javascript/java).
 
         Returns:
-            tree_sitter.Parser 实例
+            The loaded language module.
+
+        Raises:
+            ImportError: If the tree-sitter package for the language is not installed.
         """
+        pkg_name = _LANGUAGE_PACKAGES.get(language)
+        if pkg_name is None:
+            raise ValueError(f"Unsupported language: {language}")
+
+        try:
+            import importlib
+            return importlib.import_module(pkg_name)
+        except ImportError:
+            raise ImportError(
+                f"tree-sitter {language} parser 未安装，请运行: pip install {pkg_name}"
+            )
+
+    def _get_language(self, language: str) -> Any:
+        """Get or cache a tree-sitter Language object for the given language.
+
+        Args:
+            language: Language name.
+
+        Returns:
+            tree_sitter.Language instance.
+        """
+        if language not in self._languages:
+            import tree_sitter
+            mod = self._load_language_module(language)
+            # tree-sitter packages expose .language() as a function returning bytes/object
+            self._languages[language] = tree_sitter.Language(mod.language())
+        return self._languages[language]
+
+    def _get_parser(self, language: str):
+        """Get or cache a tree-sitter Parser for the given language.
+
+        Args:
+            language: Language name (python/go/typescript/javascript/java).
+
+        Returns:
+            tree_sitter.Parser instance, set to parse the given language.
+
+        Raises:
+            ImportError: If the tree-sitter package for the language is not installed.
+            ValueError: If the language is not in SUPPORTED_LANGUAGES.
+        """
+        if language not in SUPPORTED_LANGUAGES:
+            raise ValueError(
+                f"不支持的语言: {language}。当前支持: {', '.join(SUPPORTED_LANGUAGES.keys())}"
+            )
+
         if language not in self._parsers:
-            if language == "python":
-                try:
-                    import tree_sitter_python as tspy
-                    import tree_sitter
-                except ImportError:
-                    raise ImportError(
-                        "tree-sitter-python 未安装，请运行: pip install tree-sitter-python"
-                    )
-                parser = tree_sitter.Parser()
-                py_lang = tree_sitter.Language(tspy.language())
-                parser.set_language(py_lang)
-                self._parsers[language] = parser
-            else:
-                raise ValueError(
-                    f"不支持的语言: {language}。当前仅支持: python"
-                )
+            import tree_sitter
+            parser = tree_sitter.Parser()
+            ts_lang = self._get_language(language)
+            parser.set_language(ts_lang)
+            self._parsers[language] = parser
+
         return self._parsers[language]
 
     def parse(

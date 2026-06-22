@@ -1,0 +1,18 @@
+# Prometheus configuration — Code Review Workbench
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: "code-review-workbench"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          app: "code-review-workbench"
+          env: "production"
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

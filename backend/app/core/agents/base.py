@@ -23,6 +23,7 @@ class AgentContext:
     llm: type[LLMProvider] = LLMProvider
     ast_engine: ASTEngine = field(default_factory=ASTEngine)
     memory_context: str = ""
+    language: str = "python"  # 当前审查语言，默认 python
     config: dict = field(default_factory=dict)
 
 

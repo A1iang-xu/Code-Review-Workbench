@@ -47,15 +47,28 @@ def _get_agent_context() -> AgentContext:
 # 辅助函数
 # ============================================================
 
-def _parse_files(files: list[dict[str, str]]) -> list:
-    """从 ReviewState 的 files 字段解析所有代码文件。"""
+def _parse_files(files: list[dict[str, str]], language: str = "auto") -> list:
+    """从 ReviewState 的 files 字段解析所有代码文件。
+
+    Args:
+        files: 文件列表 [{"path": "...", "content": "..."}]
+        language: 目标语言，"auto" 表示自动检测
+    """
     engine = ASTEngine()
     parsed_files = []
     for file_info in files:
         path = file_info["path"]
         content = file_info["content"]
+
+        # 确定解析语言
+        if language != "auto":
+            parse_lang = language
+        else:
+            from app.integrations.ast_engine import detect_language
+            parse_lang = detect_language(path)
+
         try:
-            pf = engine.parse(content, path)
+            pf = engine.parse(content, path, language=parse_lang)
             parsed_files.append(pf)
         except Exception as e:
             print("[Orchestrator] 解析 {} 失败: {}".format(path, e))
@@ -70,7 +83,8 @@ async def parse_code_node(state: ReviewState) -> dict[str, Any]:
     """解析所有代码文件节点。"""
     memory = _get_memory()
     memory.new_session(max_tokens=4000)
-    parsed_files = _parse_files(state.get("files", []))
+    lang = state.get("language", "auto")
+    parsed_files = _parse_files(state.get("files", []), language=lang)
     for file_info in state.get("files", []):
         path = file_info["path"]
         found = any(pf.path == path for pf in parsed_files)

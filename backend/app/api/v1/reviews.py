@@ -33,6 +33,10 @@ class ReviewRequest(BaseModel):
     files: list[CodeFile] = Field(..., description="待审查的代码文件列表")
     repo_url: str = Field(default="", description="Git 仓库 URL（可选）")
     branch: str = Field(default="", description="分支名（可选）")
+    language: str = Field(
+        default="auto",
+        description="审查语言: auto / python / go / typescript / javascript / java"
+    )
 
 
 class ReviewResponse(BaseModel):
@@ -74,6 +78,7 @@ async def create_review(request: ReviewRequest):
         "task_id": task_id,
         "repo_url": request.repo_url,
         "branch": request.branch,
+        "language": request.language,
         "files": [f.model_dump() for f in request.files],
         "current_stage": "parse_code",
         "progress": 0.0,

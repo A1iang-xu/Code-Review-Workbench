@@ -1,19 +1,33 @@
 # Code Review Workbench — Backend Dockerfile
-FROM python:3.11-slim
+# Multi-stage pattern for smaller production images
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# 系统依赖
+# System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    build-essential \
+    git \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Python 依赖
+# Python dependencies
 COPY pyproject.toml .
 RUN pip install --no-cache-dir -e ".[dev]"
 
-# 源码
+# Copy app code
 COPY . .
+
+# Create memory data directory
+RUN mkdir -p /app/memory_data
+
+# Expose
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

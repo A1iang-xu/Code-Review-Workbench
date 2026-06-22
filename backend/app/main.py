@@ -1,10 +1,11 @@
 """
 FastAPI 应用入口
 
-- 生命周期管理（Skill 初始化）
+- 生命周期管理（Skill 初始化、Telemetry、日志）
 - CORS 中间件
 - 健康检查端点
-- API 路由注册（reviews、streaming、skills）
+- Prometheus /metrics 端点
+- API 路由注册（reviews、streaming、skills、webhooks）
 """
 
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from app.config import get_settings
 
@@ -24,6 +26,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 启动
     print(f"[{settings.APP_NAME}] 启动中 — 环境: {settings.APP_ENV}")
 
+    # 初始化结构化日志
+    try:
+        from app.utils.logger import setup_logging
+        setup_logging()
+    except Exception as e:
+        print(f"[{settings.APP_NAME}] 日志初始化失败: {e}")
+
     # 初始化 Skill 系统
     try:
         from app.core.skills import init_skills
@@ -31,6 +40,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         print(f"[{settings.APP_NAME}] Skill 系统已初始化，已注册 {registry.count} 个 Skill")
     except Exception as e:
         print(f"[{settings.APP_NAME}] Skill 系统初始化失败: {e}")
+
+    # 初始化 OpenTelemetry
+    try:
+        from app.utils.telemetry import setup_telemetry
+        setup_telemetry(app)
+    except Exception as e:
+        print(f"[{settings.APP_NAME}] Telemetry 初始化失败: {e}")
 
     yield
     # 关闭
@@ -40,14 +56,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Code Review Workbench",
     description="智能代码审查与重构工坊 — 多 Agent 协作平台",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
 # --- CORS 中间件 ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -62,7 +78,21 @@ async def health_check():
         "status": "ok",
         "app": settings.APP_NAME,
         "env": settings.APP_ENV,
+        "version": "0.3.0",
     }
+
+
+# --- Prometheus Metrics 端点 ---
+@app.get("/metrics")
+async def metrics():
+    """Prometheus 指标端点。
+
+    返回 Prometheus 文本格式的指标数据。
+    Scraped by Prometheus service at configured interval.
+    """
+    from app.utils.metrics import metrics_endpoint
+    body, content_type = metrics_endpoint()
+    return Response(content=body, media_type=content_type)
 
 
 # ============================================================
@@ -143,3 +173,7 @@ app.include_router(ws_router, prefix="/api/v1")
 # Skill 管理 API
 from app.api.v1.skills import router as skills_router  # noqa: E402
 app.include_router(skills_router, prefix="/api/v1")
+
+# Webhook API
+from app.api.v1.webhooks import router as webhooks_router  # noqa: E402
+app.include_router(webhooks_router, prefix="/api/v1")

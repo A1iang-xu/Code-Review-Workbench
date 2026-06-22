@@ -22,6 +22,7 @@ class ReviewState(TypedDict):
     task_id: str
     repo_url: str
     branch: str
+    language: str  # 审查语言: auto / python / go / typescript / javascript / java
 
     # ---- 代码文件 ----
     files: list[dict[str, str]]  # [{"path": "...", "content": "..."}]
