@@ -1,8 +1,10 @@
 """
 LangGraph 工作流编排器
 
-构建审查流水线 StateGraph：parse_code → style_review → generate_report
-阶段一使用线性流程（3 节点），阶段二扩展为并行 Agent 编排。
+构建审查流水线 StateGraph：
+parse_code → [5 个 Agent 并行] → arbitrate → generate_report → END
+
+阶段二：并行 Agent 编排（8 节点），充分利用异步 I/O 减少总耗时。
 """
 
 import datetime
@@ -13,8 +15,43 @@ from langgraph.graph import END, StateGraph
 
 from app.core.agents.base import AgentContext
 from app.core.agents.style import StyleCheckerAgent
+from app.core.agents.security import SecurityAuditorAgent
+from app.core.agents.architecture import ArchitectureAnalyzerAgent
+from app.core.agents.performance import PerformanceProfilerAgent
+from app.core.agents.refactor import RefactorAdvisorAgent
+from app.core.agents.arbitrator import ArbitratorAgent
 from app.core.state import ReviewState
 from app.integrations.ast_engine import ASTEngine
+
+
+# ============================================================
+# 辅助函数
+# ============================================================
+
+def _parse_files(files: list[dict[str, str]]) -> "list":
+    """从 ReviewState 的 files 字段解析所有代码文件。
+
+    使用 ASTEngine 解析每个文件，返回 ParsedFile 列表。
+
+    Args:
+        files: [{"path": "...", "content": "..."}]
+
+    Returns:
+        ParsedFile 对象列表
+    """
+    engine = ASTEngine()
+    parsed_files = []
+
+    for file_info in files:
+        path = file_info["path"]
+        content = file_info["content"]
+        try:
+            pf = engine.parse(content, path)
+            parsed_files.append(pf)
+        except Exception as e:
+            print(f"[Orchestrator] 解析 {path} 失败: {e}")
+
+    return parsed_files
 
 
 # ============================================================
@@ -22,60 +59,195 @@ from app.integrations.ast_engine import ASTEngine
 # ============================================================
 
 async def parse_code_node(state: ReviewState) -> dict[str, Any]:
-    """解析所有代码文件。
+    """解析所有代码文件节点。
 
     遍历 state.files，用 ASTEngine 解析每个文件，
     将 ParsedFile 对象存入过渡状态。
     """
-    engine = ASTEngine()
-    parsed_files = []
+    parsed_files = _parse_files(state.get("files", []))
 
+    # 记录解析错误
     for file_info in state.get("files", []):
         path = file_info["path"]
-        content = file_info["content"]
-
-        try:
-            pf = engine.parse(content, path)
-            parsed_files.append(pf)
-        except Exception as e:
-            state["errors"].append(f"解析 {path} 失败: {e}")
+        found = any(pf.path == path for pf in parsed_files)
+        if not found:
+            state["errors"].append(f"解析 {path} 失败：语言不支持或语法错误")
 
     return {
-        "current_stage": "style_review",
-        "progress": 0.33,
+        "current_stage": "agent_reviews",
+        "progress": 0.1,
         "_parsed_files": parsed_files,
     }
 
 
 async def style_review_node(state: ReviewState) -> dict[str, Any]:
-    """执行风格审查。
+    """风格审查节点。
 
-    创建 StyleCheckerAgent 对解析后的文件进行审查，
-    返回 style_results。
+    创建 StyleCheckerAgent 对解析后的文件进行审查。
     """
     parsed_files: list = state.get("_parsed_files", [])
     context = AgentContext()
 
-    style_agent = StyleCheckerAgent(context)
+    agent = StyleCheckerAgent(context)
     try:
-        results = await style_agent.review(parsed_files)
+        results = await agent.review(parsed_files)
     except Exception as e:
         results = []
         state["errors"].append(f"风格审查失败: {e}")
 
     return {
-        "current_stage": "generate_report",
-        "progress": 0.66,
+        "current_stage": "agent_reviews",
+        "progress": state.get("progress", 0.1) + 0.12,
         "style_results": results,
     }
 
 
-async def generate_report_node(state: ReviewState) -> dict[str, Any]:
-    """生成审查报告。
+async def security_review_node(state: ReviewState) -> dict[str, Any]:
+    """安全审计节点。
 
-    统计各严重等级问题数量，计算扣分制评分，生成摘要。
+    创建 SecurityAuditorAgent 执行正则 + LLM 双层安全扫描。
     """
-    # 收集所有 Agent 结果
+    parsed_files: list = state.get("_parsed_files", [])
+    context = AgentContext()
+
+    agent = SecurityAuditorAgent(context)
+    try:
+        results = await agent.review(parsed_files)
+    except Exception as e:
+        results = []
+        state["errors"].append(f"安全审计失败: {e}")
+
+    return {
+        "current_stage": "agent_reviews",
+        "progress": state.get("progress", 0.1) + 0.12,
+        "security_results": results,
+    }
+
+
+async def architecture_review_node(state: ReviewState) -> dict[str, Any]:
+    """架构分析节点。
+
+    创建 ArchitectureAnalyzerAgent 执行依赖图分析 + LLM 架构评估。
+    """
+    parsed_files: list = state.get("_parsed_files", [])
+    context = AgentContext()
+
+    agent = ArchitectureAnalyzerAgent(context)
+    try:
+        results = await agent.review(parsed_files)
+    except Exception as e:
+        results = []
+        state["errors"].append(f"架构分析失败: {e}")
+
+    return {
+        "current_stage": "agent_reviews",
+        "progress": state.get("progress", 0.1) + 0.12,
+        "architecture_results": results,
+    }
+
+
+async def performance_review_node(state: ReviewState) -> dict[str, Any]:
+    """性能分析节点。
+
+    创建 PerformanceProfilerAgent 执行圈复杂度分析 + LLM 性能评估。
+    """
+    parsed_files: list = state.get("_parsed_files", [])
+    context = AgentContext()
+
+    agent = PerformanceProfilerAgent(context)
+    try:
+        results = await agent.review(parsed_files)
+    except Exception as e:
+        results = []
+        state["errors"].append(f"性能分析失败: {e}")
+
+    return {
+        "current_stage": "agent_reviews",
+        "progress": state.get("progress", 0.1) + 0.12,
+        "performance_results": results,
+    }
+
+
+async def refactor_review_node(state: ReviewState) -> dict[str, Any]:
+    """重构建议节点。
+
+    创建 RefactorAdvisorAgent 执行 AST 坏味道检测 + LLM 重构方案。
+    """
+    parsed_files: list = state.get("_parsed_files", [])
+    context = AgentContext()
+
+    agent = RefactorAdvisorAgent(context)
+    try:
+        results = await agent.review(parsed_files)
+    except Exception as e:
+        results = []
+        state["errors"].append(f"重构分析失败: {e}")
+
+    return {
+        "current_stage": "agent_reviews",
+        "progress": state.get("progress", 0.1) + 0.12,
+        "refactor_results": results,
+    }
+
+
+async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
+    """仲裁汇总节点。
+
+    收集所有 Agent 结果，调用 ArbitratorAgent 执行去重、排序、
+    评分和摘要生成。
+    """
+    context = AgentContext()
+    arbitrator = ArbitratorAgent(context)
+
+    style_results = state.get("style_results", [])
+    security_results = state.get("security_results", [])
+    architecture_results = state.get("architecture_results", [])
+    performance_results = state.get("performance_results", [])
+    refactor_results = state.get("refactor_results", [])
+
+    try:
+        arbitrated = await arbitrator.arbitrate_full(
+            style_results=style_results,
+            security_results=security_results,
+            architecture_results=architecture_results,
+            performance_results=performance_results,
+            refactor_results=refactor_results,
+            task_id=state.get("task_id", ""),
+        )
+    except Exception as e:
+        # 降级：不为空但也不完整的结果
+        state["errors"].append(f"仲裁汇总失败: {e}")
+        arbitrated = {
+            "merged_results": (
+                style_results + security_results + architecture_results +
+                performance_results + refactor_results
+            ),
+            "severity_counts": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "score": 0.0,
+            "summary": f"审查完成（仲裁汇总失败: {str(e)[:80]}）",
+            "report_html": f"<p>仲裁汇总失败: {str(e)[:200]}</p>",
+            "stats": {},
+        }
+
+    return {
+        "current_stage": "generate_report",
+        "progress": 0.8,
+        "report_summary": arbitrated["summary"],
+        "report_score": arbitrated["score"],
+        # 将 merged_results 作为 _merged_results 暂存
+        "_merged_results": arbitrated["merged_results"],
+    }
+
+
+async def generate_report_node(state: ReviewState) -> dict[str, Any]:
+    """报告生成节点。
+
+    调用 ArbitratorAgent 生成 HTML 报告，保存审查结果。
+    """
+    context = AgentContext()
+    arbitrator = ArbitratorAgent(context)
+
+    # 收集所有结果
     all_results: list[dict] = []
     all_results.extend(state.get("style_results", []))
     all_results.extend(state.get("security_results", []))
@@ -83,62 +255,52 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
     all_results.extend(state.get("performance_results", []))
     all_results.extend(state.get("refactor_results", []))
 
-    # 统计严重等级
+    # 尝试使用仲裁后的结果
+    merged = state.get("_merged_results", [])
+    if not merged:
+        merged = all_results
+
+    # 统计
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     category_counts: dict[str, int] = {}
 
-    for r in all_results:
+    for r in merged:
         sev = r.get("severity", "info")
         if sev in severity_counts:
             severity_counts[sev] += 1
         cat = r.get("category", "other")
         category_counts[cat] = category_counts.get(cat, 0) + 1
 
-    # 扣分制评分计算
-    # 基础分为 100，不同严重等级扣分权重不同
-    deductions = (
-        severity_counts["critical"] * 20
-        + severity_counts["high"] * 10
-        + severity_counts["medium"] * 5
-        + severity_counts["low"] * 2
-        + severity_counts["info"] * 0
+    # 如果仲裁失败，使用备用评分
+    score = state.get("report_score", 0.0)
+    if score == 0.0:
+        deductions = (
+            severity_counts["critical"] * 2.0
+            + severity_counts["high"] * 1.0
+            + severity_counts["medium"] * 0.3
+            + severity_counts["low"] * 0.1
+        )
+        score = round(max(0.0, 10.0 - (deductions * 0.5)), 1)
+
+    summary = state.get("report_summary", "")
+
+    # 统计各 Agent 发现数
+    agent_stats: dict[str, int] = {}
+    for r in all_results:
+        at = r.get("agent_type", "unknown")
+        agent_stats[at] = agent_stats.get(at, 0) + 1
+
+    # 生成 HTML 报告
+    report_html = arbitrator.generate_html_report(
+        merged_results=merged,
+        severity_counts=severity_counts,
+        category_counts=category_counts,
+        score=score,
+        summary=summary,
+        stats={"by_agent": agent_stats, "total_issues": len(merged)},
+        task_id=state.get("task_id", ""),
     )
-    score = max(0.0, 100.0 - deductions)
 
-    # 生成摘要
-    total = len(all_results)
-    if total == 0:
-        summary = "代码审查完成，未发现问题。代码质量良好。"
-    else:
-        summary_parts = [f"代码审查完成，共发现 {total} 个问题："]
-        if severity_counts["critical"]:
-            summary_parts.append(f"🔴 严重: {severity_counts['critical']} 个")
-        if severity_counts["high"]:
-            summary_parts.append(f"🟠 高危: {severity_counts['high']} 个")
-        if severity_counts["medium"]:
-            summary_parts.append(f"🟡 中危: {severity_counts['medium']} 个")
-        if severity_counts["low"]:
-            summary_parts.append(f"🔵 低危: {severity_counts['low']} 个")
-        if severity_counts["info"]:
-            summary_parts.append(f"ℹ️  信息: {severity_counts['info']} 个")
-        summary = "\n".join(summary_parts)
-
-    # 构建 report_html
-    report_lines = ["<h2>代码审查报告</h2>", f"<p>{summary.replace(chr(10), '<br>')}</p>"]
-    report_lines.append(f"<p><strong>综合评分: {score:.1f}/100</strong></p>")
-
-    if all_results:
-        report_lines.append("<h3>问题详情</h3>")
-        report_lines.append("<table border='1'><tr><th>严重度</th><th>分类</th><th>文件</th><th>行号</th><th>标题</th><th>建议</th></tr>")
-        for r in all_results:
-            report_lines.append(
-                f"<tr><td>{r.get('severity')}</td><td>{r.get('category')}</td>"
-                f"<td>{r.get('file_path')}</td><td>{r.get('line_start')}-{r.get('line_end')}</td>"
-                f"<td>{r.get('title')}</td><td>{r.get('suggestion', '')}</td></tr>"
-            )
-        report_lines.append("</table>")
-
-    report_html = "\n".join(report_lines)
     completed_at = datetime.datetime.utcnow().isoformat()
 
     return {
@@ -152,14 +314,15 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
 
 
 # ============================================================
-# 构建 StateGraph
+# 构建 StateGraph（并行编排）
 # ============================================================
 
 def build_review_graph() -> StateGraph:
     """构建审查工作流图。
 
-    阶段一：线性流程
-    parse_code → style_review → generate_report → END
+    阶段二：并行 Agent 编排
+    parse_code → [style | security | architecture | performance | refactor] (并行)
+             → arbitrate → generate_report → END
 
     Returns:
         编译后的 StateGraph
@@ -169,12 +332,32 @@ def build_review_graph() -> StateGraph:
     # 添加节点
     graph.add_node("parse_code", parse_code_node)
     graph.add_node("style_review", style_review_node)
+    graph.add_node("security_review", security_review_node)
+    graph.add_node("architecture_review", architecture_review_node)
+    graph.add_node("performance_review", performance_review_node)
+    graph.add_node("refactor_review", refactor_review_node)
+    graph.add_node("arbitrate", arbitrate_node)
     graph.add_node("generate_report", generate_report_node)
 
-    # 设置边（线性流程）
+    # 设置入口
     graph.set_entry_point("parse_code")
+
+    # parse_code → 5 个 Agent（分叉，并行执行）
     graph.add_edge("parse_code", "style_review")
-    graph.add_edge("style_review", "generate_report")
+    graph.add_edge("parse_code", "security_review")
+    graph.add_edge("parse_code", "architecture_review")
+    graph.add_edge("parse_code", "performance_review")
+    graph.add_edge("parse_code", "refactor_review")
+
+    # 5 个 Agent → arbitrate（汇聚）
+    graph.add_edge("style_review", "arbitrate")
+    graph.add_edge("security_review", "arbitrate")
+    graph.add_edge("architecture_review", "arbitrate")
+    graph.add_edge("performance_review", "arbitrate")
+    graph.add_edge("refactor_review", "arbitrate")
+
+    # arbitrate → generate_report → END
+    graph.add_edge("arbitrate", "generate_report")
     graph.add_edge("generate_report", END)
 
     return graph.compile()

@@ -1,10 +1,10 @@
 """
 FastAPI 应用入口
 
-- 生命周期管理
+- 生命周期管理（Skill 初始化）
 - CORS 中间件
 - 健康检查端点
-- API 路由注册
+- API 路由注册（reviews、streaming、skills）
 """
 
 from contextlib import asynccontextmanager
@@ -23,6 +23,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动/关闭时的初始化与清理。"""
     # 启动
     print(f"[{settings.APP_NAME}] 启动中 — 环境: {settings.APP_ENV}")
+
+    # 初始化 Skill 系统
+    try:
+        from app.core.skills import init_skills
+        registry = init_skills()
+        print(f"[{settings.APP_NAME}] Skill 系统已初始化，已注册 {registry.count} 个 Skill")
+    except Exception as e:
+        print(f"[{settings.APP_NAME}] Skill 系统初始化失败: {e}")
+
     yield
     # 关闭
     print(f"[{settings.APP_NAME}] 已关闭")
@@ -31,7 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Code Review Workbench",
     description="智能代码审查与重构工坊 — 多 Agent 协作平台",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -56,12 +65,8 @@ async def health_check():
     }
 
 
-# --- 延迟导入以避免循环依赖 ---
-# 路由将在任务 3 和任务 6 中注册
-
-
 # ============================================================
-# 测试端点 (任务 3.5: POST /api/test/llm)
+# 测试端点 (POST /api/test/llm)
 # ============================================================
 
 from fastapi import APIRouter  # noqa: E402
@@ -124,9 +129,17 @@ app.include_router(test_router)
 
 
 # ============================================================
-# v1 API 路由注册 (任务 6)
+# v1 API 路由注册
 # ============================================================
 
+# 审查 API
 from app.api.v1.reviews import router as reviews_router  # noqa: E402
-
 app.include_router(reviews_router, prefix="/api/v1")
+
+# SSE 进度推送
+from app.api.v1.ws import router as ws_router  # noqa: E402
+app.include_router(ws_router, prefix="/api/v1")
+
+# Skill 管理 API
+from app.api.v1.skills import router as skills_router  # noqa: E402
+app.include_router(skills_router, prefix="/api/v1")

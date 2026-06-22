@@ -39,6 +39,7 @@ class ReviewState(TypedDict):
 
     # ---- 内部过渡数据 ----
     _parsed_files: list  # ParsedFile 对象列表（节点间传递，不持久化）
+    _merged_results: list  # 仲裁后的合并结果（节点间传递，不持久化）
 
     # ---- 报告 ----
     report_summary: str

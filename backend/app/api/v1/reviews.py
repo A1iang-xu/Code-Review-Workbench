@@ -1,7 +1,7 @@
 """
 审查 API 端点
 
-POST /api/v1/reviews   — 提交代码审查任务
+POST /api/v1/reviews   — 提交代码审查任务（并行 5 Agent + 仲裁）
 GET  /api/v1/reviews/{task_id} — 查询审查结果
 """
 
@@ -43,6 +43,7 @@ class ReviewResponse(BaseModel):
     score: Optional[float] = None
     report_html: Optional[str] = None
     issues_count: Optional[int] = None
+    stats: Optional[dict] = None  # 各 Agent 发现数
 
 
 # ============================================================
@@ -53,8 +54,17 @@ class ReviewResponse(BaseModel):
 async def create_review(request: ReviewRequest):
     """提交代码审查任务。
 
-    接收代码文件列表，启动 LangGraph 审查流水线，
-    异步执行 parse_code → style_review → generate_report。
+    接收代码文件列表，启动 LangGraph 审查流水线：
+    parse_code → [5 Agent 并行审查] → arbitrate → generate_report
+
+    5 个 Agent 并行执行：
+    - StyleChecker：代码风格与命名规范
+    - SecurityAuditor：安全漏洞检测（正则 + LLM）
+    - ArchitectureAnalyzer：依赖图分析 + 架构评估
+    - PerformanceProfiler：圈复杂度 + 性能分析
+    - RefactorAdvisor：代码坏味道 + 重构方案
+
+    审查完成后由 ArbitratorAgent 汇总去重、评分并生成 HTML 报告。
     """
     task_id = str(uuid.uuid4())
     started_at = datetime.datetime.utcnow().isoformat()
@@ -73,6 +83,7 @@ async def create_review(request: ReviewRequest):
         "performance_results": [],
         "refactor_results": [],
         "_parsed_files": [],
+        "_merged_results": [],
         "report_summary": "",
         "report_score": 0.0,
         "report_html": "",
@@ -91,15 +102,28 @@ async def create_review(request: ReviewRequest):
             summary=f"审查流水线执行失败: {str(e)}",
         )
 
-    # 统计问题总数
+    # 统计问题总数和各 Agent 发现数
     all_results: list = []
-    all_results.extend(final_state.get("style_results", []))
-    all_results.extend(final_state.get("security_results", []))
-    all_results.extend(final_state.get("architecture_results", []))
-    all_results.extend(final_state.get("performance_results", []))
-    all_results.extend(final_state.get("refactor_results", []))
+    agent_stats: dict[str, int] = {}
+
+    result_keys = [
+        ("style_results", "style"),
+        ("security_results", "security"),
+        ("architecture_results", "architecture"),
+        ("performance_results", "performance"),
+        ("refactor_results", "refactor"),
+    ]
+
+    for key, agent_name in result_keys:
+        results = final_state.get(key, [])
+        all_results.extend(results)
+        if results:
+            agent_stats[agent_name] = len(results)
 
     errors = final_state.get("errors", [])
+    merged_count = len(final_state.get("_merged_results", []))
+    # 如果仲裁成功，使用去重后的数量
+    issues_count = merged_count if merged_count > 0 else len(all_results)
 
     return ReviewResponse(
         task_id=task_id,
@@ -107,7 +131,8 @@ async def create_review(request: ReviewRequest):
         summary=final_state.get("report_summary", ""),
         score=final_state.get("report_score", 0.0),
         report_html=final_state.get("report_html", ""),
-        issues_count=len(all_results),
+        issues_count=issues_count,
+        stats=agent_stats,
     )
 
 
@@ -115,10 +140,10 @@ async def create_review(request: ReviewRequest):
 async def get_review(task_id: str):
     """查询审查结果。
 
-    阶段一返回占位信息，完整实现在阶段三完成。
+    阶段二返回占位信息，任务状态持久化在阶段三完成。
     """
     return ReviewResponse(
         task_id=task_id,
         status="completed",
-        summary="阶段一：此端点返回占位信息，完整实现在阶段三完成。",
+        summary="阶段二：审查结果查询需要任务状态持久化（阶段三完成）。",
     )
