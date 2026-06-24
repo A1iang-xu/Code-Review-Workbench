@@ -167,9 +167,17 @@ class PerformanceProfilerAgent(BaseReviewAgent):
         class_names: list[str] = ["__top__"]  # 用栈追踪类名
 
         def find_functions(node):
+            if node.type == "decorated_definition":
+                # decorated_definition 的子节点是 decorator 和 function_definition/class_definition
+                # 递归进入 function_definition/class_definition 子节点
+                for child in node.children:
+                    if child.type in ("function_definition", "class_definition"):
+                        find_functions(child)
+                return
+
             if node.type in ("function_definition", ):
                 func_nodes.append((node, class_names[-1] if class_names else "__top__"))
-            elif node.type in ("class_definition", "decorated_definition"):
+            elif node.type == "class_definition":
                 # 提取类名
                 for child in node.children:
                     if child.type == "identifier":
@@ -181,7 +189,7 @@ class PerformanceProfilerAgent(BaseReviewAgent):
             for child in node.children:
                 find_functions(child)
 
-            if node.type in ("class_definition", "decorated_definition"):
+            if node.type == "class_definition":
                 if len(class_names) > 1:
                     class_names.pop()
 
@@ -290,19 +298,10 @@ class PerformanceProfilerAgent(BaseReviewAgent):
 
             return findings
 
-        except (json.JSONDecodeError, Exception) as e:
-            return [{
-                "agent_type": self.agent_type,
-                "severity": "info",
-                "file_path": parsed_file.path,
-                "line_start": 0,
-                "line_end": 0,
-                "category": "llm_error",
-                "title": f"LLM 性能分析失败: {str(e)[:100]}",
-                "description": "本地模型调用失败，仅完成圈复杂度分析",
-                "suggestion": "请检查 Ollama 是否运行并已部署模型",
-                "code_snippet": "",
-            }]
+        except Exception as e:
+            # LLM 失败时静默跳过，避免在问题列表中产生 llm_error 噪声
+            print(f"[PerformanceProfiler] LLM 分析失败，已跳过: {e}")
+            return []
 
     # ---- 主 entry point ----
 

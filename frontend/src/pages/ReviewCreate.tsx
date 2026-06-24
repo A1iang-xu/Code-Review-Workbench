@@ -10,6 +10,15 @@ interface FileItem {
   content: string;
 }
 
+const detectLanguage = (path: string): string => {
+  const ext = path.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    py: 'python', go: 'go', ts: 'typescript', tsx: 'typescript',
+    js: 'javascript', jsx: 'javascript', java: 'java',
+  };
+  return map[ext || ''] || 'python';
+};
+
 export const ReviewCreate: FC = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -72,8 +81,9 @@ export const ReviewCreate: FC = () => {
   const submit = async () => {
     setSubmitting(true);
     setError(null);
+    const validFiles = files.filter((f) => f.path.trim() && f.content.trim());
     const payload: ReviewRequest = {
-      files: files.filter((f) => f.content.trim()),
+      files: validFiles,
       repo_url: repoUrl,
       branch,
     };
@@ -138,7 +148,7 @@ export const ReviewCreate: FC = () => {
         {/* File tabs */}
         <div className="flex items-center border-b border-slate-200 px-3 py-1 overflow-x-auto bg-slate-50/50">
           {files.map((f, idx) => (
-            <div key={idx} className="flex items-center">
+            <div key={f.path || `file-${idx}`} className="flex items-center">
               <button
                 onClick={() => setActiveFileIdx(idx)}
                 className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t transition-all whitespace-nowrap ${
@@ -204,7 +214,7 @@ export const ReviewCreate: FC = () => {
         <div style={{ height: 500 }}>
           <Editor
             height="100%"
-            language="python"
+            language={detectLanguage(activeFile?.path || '')}
             theme="vs-light"
             value={activeFile?.content || ''}
             onChange={updateFileContent}

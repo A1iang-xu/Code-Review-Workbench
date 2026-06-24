@@ -43,14 +43,14 @@ export const AgentTimeline: FC<Props> = ({ timeline }) => {
           <div key={agent.agent_type} className="flex gap-4">
             {/* Timeline dot + line */}
             <div className="flex flex-col items-center">
-              <div className={`mt-1 ${colorClass} ${isAnimating ? 'animate-pulse' : ''}`}>
+              <div className={`mt-1 ${colorClass}`}>
                 <Icon size={18} className={isAnimating ? 'animate-spin' : ''} />
               </div>
               {!isLast && <div className="w-0.5 flex-1 bg-slate-200 my-1" />}
             </div>
 
             {/* Content */}
-            <div className={`pb-5 flex-1 ${isLast ? '' : ''}`}>
+            <div className="pb-5 flex-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-slate-700">
                   {agent.display_name}

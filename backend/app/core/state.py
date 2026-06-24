@@ -5,11 +5,13 @@ LangGraph 工作流状态 TypedDict，贯穿整个审查流水线。
 所有 Agent 结果通过 Annotated list + operator.add 汇聚。
 """
 
-import datetime
-import uuid
+import operator
 from typing import Annotated, TypedDict
 
-from app.integrations.ast_engine import ParsedFile
+
+def _last_value(a, b):
+    """Reducer: 取最后写入的值（用于并行节点覆写同一字段）。"""
+    return b
 
 
 class ReviewState(TypedDict):
@@ -28,15 +30,16 @@ class ReviewState(TypedDict):
     files: list[dict[str, str]]  # [{"path": "...", "content": "..."}]
 
     # ---- 工作流进度 ----
-    current_stage: str  # parse_code / style_review / generate_report / done
-    progress: float     # 0.0 ~ 1.0
+    # Annotated 支持并行节点写入：current_stage 取最后值，progress 累加
+    current_stage: Annotated[str, _last_value]
+    progress: Annotated[float, operator.add]
 
     # ---- Agent 审查结果（Annotated list 支持 += 追加） ----
-    style_results: Annotated[list[dict], "operator.add"]  # StyleChecker 结果
-    security_results: Annotated[list[dict], "operator.add"]
-    architecture_results: Annotated[list[dict], "operator.add"]
-    performance_results: Annotated[list[dict], "operator.add"]
-    refactor_results: Annotated[list[dict], "operator.add"]
+    style_results: Annotated[list[dict], operator.add]  # StyleChecker 结果
+    security_results: Annotated[list[dict], operator.add]
+    architecture_results: Annotated[list[dict], operator.add]
+    performance_results: Annotated[list[dict], operator.add]
+    refactor_results: Annotated[list[dict], operator.add]
 
     # ---- 内部过渡数据 ----
     _parsed_files: list  # ParsedFile 对象列表（节点间传递，不持久化）
@@ -48,7 +51,7 @@ class ReviewState(TypedDict):
     report_html: str
 
     # ---- 错误 ----
-    errors: Annotated[list[str], "operator.add"]
+    errors: Annotated[list[str], operator.add]
 
     # ---- 时间戳 ----
     started_at: str

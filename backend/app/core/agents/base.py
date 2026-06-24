@@ -42,6 +42,13 @@ class BaseReviewAgent(ABC):
     def __init__(self, context: AgentContext):
         self.context = context
 
+    @staticmethod
+    def _walk(node, callback):
+        """递归遍历 AST 节点树（供子类使用）。"""
+        callback(node)
+        for child in node.children:
+            BaseReviewAgent._walk(child, callback)
+
     @abstractmethod
     async def review(self, parsed_files: list[ParsedFile]) -> list[dict]:
         """执行审查，返回问题列表。
@@ -79,6 +86,11 @@ class BaseReviewAgent(ABC):
 
         Returns:
             LLM 响应的文本内容
+
+        行为：
+        1. 优先按 use_reasoning 选择模型调用
+        2. 工具模型不可用时，**自动降级到推理模型**（避免噪声）
+        3. 任何其他异常向上传播，由 Agent 决定如何处理
         """
         system_content = (
             "You are a code review agent. "
@@ -97,8 +109,12 @@ class BaseReviewAgent(ABC):
         ]
 
         if use_reasoning:
-            resp = await self.context.llm.reasoning(messages=messages)
+            resp = await LLMProvider.reasoning(messages=messages)
         else:
-            resp = await self.context.llm.utility(messages=messages)
+            # utility() 内部已实现 Ollama→推理模型的降级
+            resp = await LLMProvider.utility(messages=messages)
+
+        if not resp.choices:
+            return []
 
         return resp.choices[0].message.content or ""

@@ -3,27 +3,17 @@
 // ============================================================
 
 export interface CodeIssue {
+  id?: string;
   agent_type: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  file_path: string;
-  line_start: number;
-  line_end: number;
-  category: string;
+  severity: string;
   title: string;
-  description: string;
-  suggestion: string;
-  code_snippet: string;
-}
-
-export interface ReviewTask {
-  task_id: string;
-  repo_url: string;
-  branch: string;
-  status: string;
-  created_at: string;
-  score: number;
-  summary: string;
-  issues_count: number;
+  file_path?: string;
+  line_start?: number;
+  line_end?: number;
+  category?: string;
+  description?: string;
+  suggestion?: string;
+  code_snippet?: string;
 }
 
 export interface AgentTimelineStep {
@@ -34,23 +24,12 @@ export interface AgentTimelineStep {
   finding_count: number;
 }
 
-export interface ReviewReport {
-  task_id: string;
-  status: string;
-  summary: string;
-  score: number;
-  report_html: string;
-  stats?: Record<string, number>;
-  issues: CodeIssue[];
-  agent_timeline?: AgentTimelineStep[];
-}
-
 export interface ReviewProgress {
   task_id: string;
   status: string;
   current_stage: string;
   progress: number;
-  completed_agents: string[];
+  completed_agents?: string[];
 }
 
 export interface SkillMeta {
@@ -65,8 +44,9 @@ export interface SkillMeta {
 
 export interface ReviewRequest {
   files: { path: string; content: string }[];
-  repo_url: string;
-  branch: string;
+  repo_url?: string;
+  branch?: string;
+  language?: string;
 }
 
 export interface ReviewResponse {
@@ -77,6 +57,9 @@ export interface ReviewResponse {
   report_html?: string;
   issues_count?: number;
   stats?: Record<string, number>;
+  issues?: CodeIssue[];
+  agent_timeline?: AgentTimelineStep[];
+  files?: { path: string; content: string }[];
 }
 
 export interface SkillExecuteRequest {

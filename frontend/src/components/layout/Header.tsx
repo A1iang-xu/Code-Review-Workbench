@@ -2,7 +2,7 @@ import { type FC } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const pageTitles: Record<string, string> = {
-  '/': 'Dashboard',
+  '/': '仪表盘',
   '/reviews/new': '新建审查',
   '/skills': 'Skill 管理',
   '/settings': '设置',

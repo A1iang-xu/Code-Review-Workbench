@@ -6,7 +6,7 @@
 """
 
 import uuid
-from datetime import datetime
+import datetime
 
 from sqlalchemy import DateTime, Enum, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -38,13 +38,13 @@ class ReviewTask(Base):
     )
     file_paths: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.datetime.now(datetime.timezone.utc),
+        onupdate=lambda: datetime.datetime.now(datetime.timezone.utc),
         nullable=False,
     )
 

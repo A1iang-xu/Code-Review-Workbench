@@ -35,11 +35,12 @@ def _get_memory() -> MemoryManager:
     return MemoryManager(storage_path="./memory_data")
 
 
-def _get_agent_context() -> AgentContext:
+def _get_agent_context(state: ReviewState) -> AgentContext:
     """创建带记忆上下文的 AgentContext。"""
     memory = _get_memory()
     return AgentContext(
-        memory_context=memory.get_system_context()
+        memory_context=memory.get_system_context(),
+        language=state.get("language", "auto"),
     )
 
 
@@ -85,112 +86,125 @@ async def parse_code_node(state: ReviewState) -> dict[str, Any]:
     memory.new_session(max_tokens=4000)
     lang = state.get("language", "auto")
     parsed_files = _parse_files(state.get("files", []), language=lang)
+    errors = []
     for file_info in state.get("files", []):
         path = file_info["path"]
         found = any(pf.path == path for pf in parsed_files)
         if not found:
-            state["errors"].append("解析 {} 失败".format(path))
+            errors.append("解析 {} 失败".format(path))
     return {
         "current_stage": "agent_reviews",
         "progress": 0.1,
         "_parsed_files": parsed_files,
+        "errors": errors,
     }
 
 
 async def style_review_node(state: ReviewState) -> dict[str, Any]:
     """风格审查节点。"""
     parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context()
+    context = _get_agent_context(state)
     agent = StyleCheckerAgent(context)
     try:
         results = await agent.review(parsed_files)
+        errors = []
     except Exception as e:
         results = []
-        state["errors"].append("风格审查失败: {}".format(e))
+        errors = ["风格审查失败: {}".format(e)]
     return {
         "current_stage": "agent_reviews",
-        "progress": state.get("progress", 0.1) + 0.12,
+        "progress": 0.12,
         "style_results": results,
+        "errors": errors,
     }
 
 
 async def security_review_node(state: ReviewState) -> dict[str, Any]:
     """安全审计节点。"""
     parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context()
+    context = _get_agent_context(state)
     agent = SecurityAuditorAgent(context)
     try:
         results = await agent.review(parsed_files)
+        errors = []
     except Exception as e:
         results = []
-        state["errors"].append("安全审计失败: {}".format(e))
+        errors = ["安全审计失败: {}".format(e)]
     return {
         "current_stage": "agent_reviews",
-        "progress": state.get("progress", 0.1) + 0.12,
+        "progress": 0.12,
         "security_results": results,
+        "errors": errors,
     }
 
 
 async def architecture_review_node(state: ReviewState) -> dict[str, Any]:
     """架构分析节点。"""
     parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context()
+    context = _get_agent_context(state)
     agent = ArchitectureAnalyzerAgent(context)
     try:
         results = await agent.review(parsed_files)
+        errors = []
     except Exception as e:
         results = []
-        state["errors"].append("架构分析失败: {}".format(e))
+        errors = ["架构分析失败: {}".format(e)]
     return {
         "current_stage": "agent_reviews",
-        "progress": state.get("progress", 0.1) + 0.12,
+        "progress": 0.12,
         "architecture_results": results,
+        "errors": errors,
     }
 
 
 async def performance_review_node(state: ReviewState) -> dict[str, Any]:
     """性能分析节点。"""
     parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context()
+    context = _get_agent_context(state)
     agent = PerformanceProfilerAgent(context)
     try:
         results = await agent.review(parsed_files)
+        errors = []
     except Exception as e:
         results = []
-        state["errors"].append("性能分析失败: {}".format(e))
+        errors = ["性能分析失败: {}".format(e)]
     return {
         "current_stage": "agent_reviews",
-        "progress": state.get("progress", 0.1) + 0.12,
+        "progress": 0.12,
         "performance_results": results,
+        "errors": errors,
     }
 
 
 async def refactor_review_node(state: ReviewState) -> dict[str, Any]:
     """重构建议节点。"""
     parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context()
+    context = _get_agent_context(state)
     agent = RefactorAdvisorAgent(context)
     try:
         results = await agent.review(parsed_files)
+        errors = []
     except Exception as e:
         results = []
-        state["errors"].append("重构分析失败: {}".format(e))
+        errors = ["重构分析失败: {}".format(e)]
     return {
         "current_stage": "agent_reviews",
-        "progress": state.get("progress", 0.1) + 0.12,
+        "progress": 0.12,
         "refactor_results": results,
+        "errors": errors,
     }
 
 
 async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
     """仲裁汇总节点。"""
-    context = _get_agent_context()
+    context = _get_agent_context(state)
     arbitrator = ArbitratorAgent(context)
     style_results = state.get("style_results", [])
     security_results = state.get("security_results", [])
     architecture_results = state.get("architecture_results", [])
     performance_results = state.get("performance_results", [])
     refactor_results = state.get("refactor_results", [])
+    errors = []
     try:
         arbitrated = await arbitrator.arbitrate_full(
             style_results=style_results,
@@ -201,7 +215,7 @@ async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
             task_id=state.get("task_id", ""),
         )
     except Exception as e:
-        state["errors"].append("仲裁汇总失败: {}".format(e))
+        errors.append("仲裁汇总失败: {}".format(e))
         arbitrated = {
             "merged_results": (
                 style_results + security_results + architecture_results +
@@ -219,12 +233,13 @@ async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
         "report_summary": arbitrated["summary"],
         "report_score": arbitrated["score"],
         "_merged_results": arbitrated["merged_results"],
+        "errors": errors,
     }
 
 
 async def generate_report_node(state: ReviewState) -> dict[str, Any]:
     """报告生成节点 - 含记忆保存。"""
-    context = _get_agent_context()
+    context = _get_agent_context(state)
     arbitrator = ArbitratorAgent(context)
 
     all_results = []
@@ -274,7 +289,7 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
         task_id=state.get("task_id", ""),
     )
 
-    completed_at = datetime.datetime.utcnow().isoformat()
+    completed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # 保存记忆
     task_id = state.get("task_id", "")

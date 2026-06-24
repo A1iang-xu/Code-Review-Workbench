@@ -9,6 +9,9 @@ export function useReviewProgress(taskId: string | undefined) {
   const connect = useCallback(() => {
     if (!taskId) return;
 
+    setIsComplete(false);
+    setError(null);
+
     const es = new EventSource(`/api/v1/reviews/${taskId}/stream`);
 
     es.addEventListener('progress', (e) => {
@@ -48,12 +51,8 @@ export function useReviewProgress(taskId: string | undefined) {
       } catch {
         setError('SSE connection error');
       }
-      es.close();
+      // Don't close — EventSource auto-reconnects
     });
-
-    es.onerror = () => {
-      // EventSource auto-reconnects; only set error if not complete
-    };
 
     return () => {
       es.close();

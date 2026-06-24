@@ -108,6 +108,8 @@ async def reload_skills():
 
     # 创建新的 registry 和 loader
     registry = SkillRegistry()
+    # 清空已注册的 Skill，避免 register() 抛出 ValueError
+    registry._skills = {}
     loader = SkillLoader(registry)
     loaded_count = loader.load_builtin()
 

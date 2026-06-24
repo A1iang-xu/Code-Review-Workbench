@@ -33,6 +33,14 @@ function App() {
                 <Route path="/reviews/:taskId" element={<ReviewDetail />} />
                 <Route path="/skills" element={<SkillManager />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center">
+                      <h1 className="text-2xl font-bold text-slate-800">404</h1>
+                      <p className="text-slate-500 mt-2">页面不存在</p>
+                    </div>
+                  </div>
+                } />
               </Routes>
             </main>
           </div>

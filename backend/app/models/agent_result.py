@@ -6,7 +6,7 @@ Agent 审查结果模型
 """
 
 import uuid
-from datetime import datetime
+import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -34,9 +34,9 @@ class AgentResult(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     suggestion: Mapped[str | None] = mapped_column(Text, nullable=True)
     code_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    extra_data: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False
     )
 
     # 关联

@@ -29,3 +29,11 @@ ollamadata/
 .coverage
 htmlcov/
 .coverage.*
+
+# Runtime data
+backend/memory_data/
+backend/uvicorn_output.log
+/models/
+test_sample.py
+test_api.py
+test_review.ps1

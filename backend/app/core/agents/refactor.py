@@ -100,7 +100,11 @@ class RefactorAdvisorAgent(BaseReviewAgent):
                                       "dictionary_splat_pattern"):
                         # 排除 self 和 cls
                         param_name = param.text.decode("utf-8") if param.text else ""
-                        if param_name.split(":")[0].strip() not in ("self", "cls"):
+                        # Handle default parameters: "x=1" -> "x"
+                        if "=" in param_name:
+                            param_name = param_name.split("=")[0].strip()
+                        param_name = param_name.split(":")[0].strip()
+                        if param_name not in ("self", "cls"):
                             count += 1
                 break
         return count
@@ -126,7 +130,7 @@ class RefactorAdvisorAgent(BaseReviewAgent):
         root = parsed_file.tree.root_node
 
         def check_node(node):
-            if node.type in ("function_definition", "method_definition"):
+            if node.type == "function_definition":
                 start_line = node.start_point[0] + 1
                 end_line = node.end_point[0] + 1
                 func_lines = end_line - start_line + 1
@@ -141,7 +145,7 @@ class RefactorAdvisorAgent(BaseReviewAgent):
                         "severity": severity,
                         "file_path": parsed_file.path,
                         "line_start": start_line,
-                        "line_end": end_line if end_line < start_line + 5 else start_line + 3,
+                        "line_end": end_line,
                         "category": "too_many_params",
                         "title": (
                             f"函数 '{func_name}' 参数过多 "
@@ -248,19 +252,10 @@ class RefactorAdvisorAgent(BaseReviewAgent):
 
             return findings
 
-        except (json.JSONDecodeError, Exception) as e:
-            return [{
-                "agent_type": self.agent_type,
-                "severity": "info",
-                "file_path": parsed_file.path,
-                "line_start": 0,
-                "line_end": 0,
-                "category": "llm_error",
-                "title": f"LLM 重构分析失败: {str(e)[:100]}",
-                "description": "推理模型调用失败，仅完成 AST 坏味道检测",
-                "suggestion": "请检查 GLM-5.2 API Key 是否有效",
-                "code_snippet": "",
-            }]
+        except Exception as e:
+            # LLM 失败时静默跳过，避免在问题列表中产生 llm_error 噪声
+            print(f"[RefactorAdvisor] LLM 分析失败，已跳过: {e}")
+            return []
 
     # ---- 主 entry point ----
 

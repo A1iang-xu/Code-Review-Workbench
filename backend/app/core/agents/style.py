@@ -12,7 +12,7 @@ import json
 import re
 
 from app.core.agents.base import AgentContext, BaseReviewAgent
-from app.integrations.ast_engine import CodeIssue, ParsedFile
+from app.integrations.ast_engine import ParsedFile
 
 
 # ============================================================
@@ -163,7 +163,7 @@ class StyleCheckerAgent(BaseReviewAgent):
     }
 
     @staticmethod
-    def _get_func_name_ts_style(node, source: bytes) -> str:
+    def _get_func_name_ts_style(node) -> str:
         """Extract function name for TS/JS nodes."""
         for child in node.children:
             if child.type == "identifier":
@@ -186,11 +186,8 @@ class StyleCheckerAgent(BaseReviewAgent):
             函数名，提取失败返回 "<unknown>"
         """
         if language in ("typescript", "javascript"):
-            return self._get_func_name_ts_style(
-                node, node.text if hasattr(node, 'text') else b""
-            )
+            return self._get_func_name_ts_style(node)
 
-        source = node.text.decode("utf-8") if hasattr(node, 'text') else ""
         if language == "python":
             for child in node.children:
                 if child.type == "def":
@@ -295,9 +292,10 @@ class StyleCheckerAgent(BaseReviewAgent):
         prompt = f"""Analyze the following {language} code for style issues. Check for:
 
 1. Naming conventions: Are variables, functions, and classes using proper naming?
-2. Comment quality: Are there missing docstrings/comments for functions and classes? Are comments meaningful?
-3. Code duplication: Any repeated code blocks?
-4. Code organization: Is the code well-structured and readable?
+   - Python: snake_case for functions/variables, PascalCase for classes, UPPER_SNAKE_CASE for constants
+2. Comment quality: Are there missing docstrings for public functions/classes? Are comments outdated or meaningless?
+3. Code duplication: Any repeated code blocks within the same file?
+4. Code organization: Is the code well-structured, with proper import ordering and logical grouping?
 
 {prompt_suffix}
 
@@ -305,14 +303,18 @@ Return ONLY a JSON array of findings. Each finding must be:
 {{
     "severity": "low|medium|high",
     "category": "naming|comment|duplication|organization|other",
-    "line_start": <line number or 0>,
-    "line_end": <line number or 0>,
-    "title": "brief title",
-    "description": "detailed explanation",
-    "suggestion": "how to fix"
+    "line_start": <exact line number where the issue starts, use 0 only if truly unknown>,
+    "line_end": <exact line number where the issue ends, use 0 only if truly unknown>,
+    "title": "brief specific title in Chinese (中文)",
+    "description": "detailed explanation in Chinese (中文)",
+    "suggestion": "specific actionable fix in Chinese (中文)"
 }}
 
-If no issues found, return [].
+Rules:
+- Only flag issues that are clearly present in the code. Do NOT invent problems.
+- If you're unsure about an issue, do NOT include it.
+- For line numbers, count from the beginning of the provided code (line 1 = first line).
+- If no issues found, return [].
 
 Code to analyze:"""
 
@@ -324,11 +326,14 @@ Code to analyze:"""
             )
 
             # 尝试提取 JSON 数组
-            json_match = re.search(r"\[.*\]", response, re.DOTALL)
+            json_match = re.search(r"\[.*?\]", response, re.DOTALL)
             if json_match:
                 findings = json.loads(json_match.group(0))
             else:
                 findings = []
+
+            if not isinstance(findings, list):
+                return []
 
             # 添加文件路径信息
             for f in findings:
@@ -340,20 +345,11 @@ Code to analyze:"""
 
             return findings
 
-        except (json.JSONDecodeError, Exception) as e:
-            # LLM 调用失败时不中断流水线
-            return [{
-                "agent_type": self.agent_type,
-                "severity": "info",
-                "file_path": parsed_file.path,
-                "line_start": 0,
-                "line_end": 0,
-                "category": "llm_error",
-                "title": f"LLM 分析失败: {str(e)[:100]}",
-                "description": "本地模型调用失败，仅完成 AST 静态分析",
-                "suggestion": "请检查 Ollama 模型是否已部署",
-                "code_snippet": "",
-            }]
+        except Exception as e:
+            # LLM 调用失败：utility() 降级也失败时，悄悄返回空列表，
+            # 错误已通过 orchestrator 的 errors 字段记录，不污染问题列表
+            print(f"[StyleChecker] LLM 分析失败，已跳过: {e}")
+            return []
 
     # ---- 主 entry point ----
 

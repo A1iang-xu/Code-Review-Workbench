@@ -48,13 +48,18 @@ class SkillLoader:
         loaded_count = 0
 
         for item in builtin_dir.iterdir():
-            if not item.is_dir():
-                continue
             if item.name.startswith("_") or item.name.startswith("."):
                 continue
 
+            if item.is_dir():
+                module_name = item.name
+            elif item.suffix == ".py":
+                module_name = item.stem
+            else:
+                continue
+
             try:
-                module_path = f"app.core.skills.builtin.{item.name}"
+                module_path = f"app.core.skills.builtin.{module_name}"
                 module = importlib.import_module(module_path)
 
                 if hasattr(module, "skill") and isinstance(module.skill, BaseSkill):

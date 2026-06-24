@@ -9,19 +9,31 @@ interface Props {
 
 const severityOrder = ['critical', 'high', 'medium', 'low', 'info'] as const;
 
+const severityLabels: Record<string, string> = {
+  critical: '严重',
+  high: '高危',
+  medium: '中等',
+  low: '低危',
+  info: '提示',
+};
+
+const issueKey = (issue: CodeIssue) =>
+  `${issue.file_path}:${issue.line_start}:${issue.title}`;
+
 export const IssueList: FC<Props> = ({ issues }) => {
   const [filter, setFilter] = useState<string>('all');
-  const [expandedSet, setExpandedSet] = useState<Set<number>>(new Set());
+  const [expandedSet, setExpandedSet] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
     if (filter === 'all') return issues;
     return issues.filter((i) => i.severity === filter);
   }, [issues, filter]);
 
-  const toggle = (idx: number) => {
+  const toggle = (key: string) => {
     setExpandedSet((prev) => {
       const next = new Set(prev);
-      next.has(idx) ? next.delete(idx) : next.add(idx);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -50,7 +62,7 @@ export const IssueList: FC<Props> = ({ issues }) => {
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            {s === 'all' ? '全部' : s}
+            {s === 'all' ? '全部' : severityLabels[s] || s}
           </button>
         ))}
         <span className="ml-auto text-xs text-slate-400">
@@ -60,16 +72,17 @@ export const IssueList: FC<Props> = ({ issues }) => {
 
       {/* Issue list */}
       <div className="space-y-2">
-        {filtered.map((issue, idx) => {
-          const isExpanded = expandedSet.has(idx);
+        {filtered.map((issue) => {
+          const key = issueKey(issue);
+          const isExpanded = expandedSet.has(key);
           return (
             <div
-              key={idx}
+              key={key}
               className="bg-white border border-slate-200 rounded-lg hover:shadow-sm transition-shadow overflow-hidden"
             >
               {/* Header */}
               <button
-                onClick={() => toggle(idx)}
+                onClick={() => toggle(key)}
                 className="w-full text-left px-4 py-3 flex items-start gap-3"
               >
                 <SeverityBadge severity={issue.severity} />
@@ -79,7 +92,7 @@ export const IssueList: FC<Props> = ({ issues }) => {
                       {issue.agent_type}
                     </span>
                     <span className="text-xs text-slate-400">
-                      {issue.file_path}:{issue.line_start}
+                      {issue.file_path || '未知文件'}:{issue.line_start || 0}
                     </span>
                   </div>
                   <p className="text-sm font-medium text-slate-800 mt-1 truncate">

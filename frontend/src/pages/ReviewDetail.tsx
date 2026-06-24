@@ -7,7 +7,6 @@ import { IssueList } from '../components/review/IssueList';
 import { DiffViewer } from '../components/review/DiffViewer';
 import { AgentTimeline } from '../components/review/AgentTimeline';
 import { ReportPanel } from '../components/review/ReportPanel';
-import { SeverityBadge } from '../components/common/SeverityBadge';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
 import { Star, AlertTriangle, FileCode, Activity, FileText } from 'lucide-react';
@@ -75,8 +74,82 @@ export const ReviewDetail: FC = () => {
     return <EmptyState title="未找到审查记录" description="该任务可能不存在或尚未完成" />;
   }
 
-  // Parse issues from report_html or use empty
-  const issues: CodeIssue[] = []; // Issues extracted from report_html if needed
+  // Running / pending: show progress indicator instead of full detail
+  if (data.status === 'pending' || data.status === 'running') {
+    return (
+      <div className="space-y-4">
+        <LoadingSpinner text="审查进行中..." />
+        {progress && (
+          <div className="max-w-md mx-auto bg-white rounded-xl border border-slate-200 p-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-slate-500">审查进度</span>
+              <span className="text-xs font-semibold text-blue-600">
+                {Math.round(progress.progress * 100)}%
+              </span>
+            </div>
+            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                style={{ width: `${progress.progress * 100}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              当前阶段: {progress.current_stage}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Parse issues from API response
+  const issues: CodeIssue[] = data.issues || [];
+
+  // Build diff content from original files
+  const originalContent = data.files?.map((f) => {
+    const header = `# ============================================================
+# File: ${f.path}
+# ============================================================\n`;
+    return header + f.content;
+  }).join('\n\n') || '';
+
+  // Build modified content from issue suggestions (if available)
+  const buildModifiedContent = () => {
+    if (!data.files || data.files.length === 0) return '';
+    const issuesWithSuggestions = issues.filter((i) => i.suggestion);
+    // If no issues with suggestions, return original unchanged
+    if (issuesWithSuggestions.length === 0) {
+      return originalContent;
+    }
+    // For now, show original with issue annotations as comments
+    return data.files.map((f) => {
+      const fileIssues = issues.filter((i) => i.file_path === f.path);
+      if (fileIssues.length === 0) {
+        const header = `# ============================================================
+# File: ${f.path} (No issues)
+# ============================================================\n`;
+        return header + f.content;
+      }
+      const lines = f.content.split('\n');
+      const annotations = new Map<number, string[]>();
+      fileIssues.forEach((issue) => {
+        const line = issue.line_start || 1;
+        const key = line - 1;
+        if (!annotations.has(key)) annotations.set(key, []);
+        annotations.get(key)!.push(`# [${(issue.severity || 'medium').toUpperCase()}] ${issue.agent_type}: ${issue.title}`);
+      });
+      const annotated = lines.map((line, idx) => {
+        const notes = annotations.get(idx);
+        return notes ? notes.join('\n') + '\n' + line : line;
+      }).join('\n');
+      const header = `# ============================================================
+# File: ${f.path} (Annotated with issues)
+# ============================================================\n`;
+      return header + annotated;
+    }).join('\n\n');
+  };
+
+  const modifiedContent = buildModifiedContent();
 
   const scoreColor =
     (data.score || 0) >= 8 ? 'text-emerald-500' : (data.score || 0) >= 6 ? 'text-amber-500' : 'text-red-500';
@@ -141,10 +214,10 @@ export const ReviewDetail: FC = () => {
             <IssueList issues={issues} />
           )}
           {activeTab === 'diff' && (
-            <DiffViewer original="" modified="" />
+            <DiffViewer original={originalContent} modified={modifiedContent} />
           )}
           {activeTab === 'timeline' && (
-            <AgentTimeline timeline={undefined} />
+            <AgentTimeline timeline={data.agent_timeline} />
           )}
           {activeTab === 'report' && (
             <ReportPanel html={data.report_html || ''} />

@@ -27,11 +27,6 @@ export const reviewApi = {
     const res = await api.get<ReviewResponse>(`/reviews/${taskId}`);
     return res.data;
   },
-
-  /** SSE 实时进度（返回 EventSource 实例） */
-  streamProgress: (taskId: string): EventSource => {
-    return new EventSource(`/api/v1/reviews/${taskId}/stream`);
-  },
 };
 
 // ---- Skill API ----

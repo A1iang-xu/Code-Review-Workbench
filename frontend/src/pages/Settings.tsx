@@ -1,5 +1,5 @@
 import { type FC } from 'react';
-import { Settings as SettingsIcon, Database, Brain, Key, Shield } from 'lucide-react';
+import { Settings as SettingsIcon, Database, Brain, Key } from 'lucide-react';
 
 export const Settings: FC = () => (
   <div className="space-y-6 fade-in max-w-3xl">
@@ -20,6 +20,7 @@ export const Settings: FC = () => (
           <input
             type="text"
             defaultValue="glm-5.2"
+            disabled
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
           />
           <p className="text-[11px] text-slate-400 mt-0.5">用于安全审计、架构分析、重构建议、仲裁汇总</p>
@@ -29,6 +30,7 @@ export const Settings: FC = () => (
           <input
             type="text"
             defaultValue="ollama/qwen2.5:7b"
+            disabled
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
           />
           <p className="text-[11px] text-slate-400 mt-0.5">用于风格检查、代码摘要、消息压缩等高频轻量任务</p>
@@ -45,11 +47,11 @@ export const Settings: FC = () => (
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs text-slate-500 mb-1">主机</label>
-          <input type="text" defaultValue="localhost" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
+          <input type="text" defaultValue="localhost" disabled className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
         </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">端口</label>
-          <input type="text" defaultValue="5432" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
+          <input type="text" defaultValue="5432" disabled className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
         </div>
       </div>
     </div>
@@ -66,6 +68,7 @@ export const Settings: FC = () => (
           <input
             type="password"
             defaultValue="••••••••••••••••"
+            disabled
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
           />
         </div>
@@ -74,6 +77,7 @@ export const Settings: FC = () => (
           <input
             type="password"
             defaultValue="••••••••••••••••"
+            disabled
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
           />
         </div>
@@ -82,6 +86,7 @@ export const Settings: FC = () => (
           <input
             type="text"
             defaultValue="http://localhost:11434"
+            disabled
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
           />
         </div>

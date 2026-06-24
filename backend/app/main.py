@@ -41,12 +41,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"[{settings.APP_NAME}] Skill 系统初始化失败: {e}")
 
-    # 初始化 OpenTelemetry
-    try:
-        from app.utils.telemetry import setup_telemetry
-        setup_telemetry(app)
-    except Exception as e:
-        print(f"[{settings.APP_NAME}] Telemetry 初始化失败: {e}")
+    # 初始化 OpenTelemetry (需要 Jaeger 运行时才启用)
+    # try:
+    #     from app.utils.telemetry import setup_telemetry
+    #     setup_telemetry(app)
+    # except Exception as e:
+    #     print(f"[{settings.APP_NAME}] Telemetry 初始化失败: {e}")
 
     yield
     # 关闭

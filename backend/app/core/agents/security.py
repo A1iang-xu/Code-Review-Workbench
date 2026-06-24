@@ -10,7 +10,6 @@ Security Auditor Agent
 
 import json
 import re
-from typing import Any
 
 from app.core.agents.base import AgentContext, BaseReviewAgent
 from app.integrations.ast_engine import ParsedFile
@@ -139,7 +138,7 @@ class SecurityAuditorAgent(BaseReviewAgent):
             发现的安全问题列表
         """
         issues: list[dict] = []
-        lines = parsed_file.content.split("\n")
+        lines = parsed_file.content.splitlines()
 
         for category, (pattern, title_tmpl, suggestion) in HIGH_RISK_PATTERNS.items():
             for i, line in enumerate(lines):
@@ -237,19 +236,10 @@ class SecurityAuditorAgent(BaseReviewAgent):
 
             return findings
 
-        except (json.JSONDecodeError, Exception) as e:
-            return [{
-                "agent_type": self.agent_type,
-                "severity": "info",
-                "file_path": file_path,
-                "line_start": 0,
-                "line_end": 0,
-                "category": "llm_error",
-                "title": f"LLM 安全分析失败: {str(e)[:100]}",
-                "description": "推理模型调用失败，仅完成正则模式扫描",
-                "suggestion": "请检查 GLM-5.2 API Key 是否有效",
-                "code_snippet": "",
-            }]
+        except Exception as e:
+            # LLM 失败时静默跳过，避免在问题列表中产生 llm_error 噪声
+            print(f"[SecurityAuditor] LLM 分析失败，已跳过: {e}")
+            return []
 
     # ---- 主 entry point ----
 
@@ -278,7 +268,7 @@ class SecurityAuditorAgent(BaseReviewAgent):
             pattern_issues = self._pattern_scan(pf)
             all_issues.extend(pattern_issues)
 
-            # 步骤 2: LLM 深度推理（仅对未命中正则的文件）
+            # 步骤 2: LLM 深度推理
             llm_issues = await self._llm_scan(pf)
             all_issues.extend(llm_issues)
 

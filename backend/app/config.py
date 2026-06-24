@@ -82,7 +82,6 @@ class Settings(BaseSettings):
 
     # ---- 可观测性 ----
     OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4317"
-    PROMETHEUS_METRICS_PORT: int = 9090
 
 
 @lru_cache()

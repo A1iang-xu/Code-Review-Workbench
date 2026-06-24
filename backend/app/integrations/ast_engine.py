@@ -173,10 +173,8 @@ class ASTEngine:
 
         if language not in self._parsers:
             import tree_sitter
-            parser = tree_sitter.Parser()
             ts_lang = self._get_language(language)
-            parser.set_language(ts_lang)
-            self._parsers[language] = parser
+            self._parsers[language] = tree_sitter.Parser(ts_lang)
 
         return self._parsers[language]
 

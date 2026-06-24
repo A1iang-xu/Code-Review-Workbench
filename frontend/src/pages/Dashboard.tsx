@@ -1,8 +1,5 @@
 import { type FC } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { reviewApi } from '../services/api';
-import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import {
   BarChart3,
   Star,

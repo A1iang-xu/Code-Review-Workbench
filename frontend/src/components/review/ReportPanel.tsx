@@ -14,9 +14,20 @@ export const ReportPanel: FC<Props> = ({ html }) => {
   }
 
   return (
-    <div
-      className="max-w-none"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className="w-full max-w-full overflow-hidden">
+      {/*
+        Use iframe + srcdoc to fully isolate the HTML report from the parent
+        React layout. The report is a complete HTML document (with <html>/<body>)
+        which, when injected via dangerouslySetInnerHTML, would otherwise
+        escape the sidebar's ml-60 margin and stretch edge-to-edge.
+      */}
+      <iframe
+        title="代码审查报告"
+        srcDoc={html}
+        className="w-full bg-white rounded-lg border border-slate-200"
+        style={{ height: '900px', display: 'block' }}
+        sandbox="allow-same-origin"
+      />
+    </div>
   );
 };

@@ -107,7 +107,7 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
             for imported in imports:
                 # 将 import 路径转换为模块名并在图中找到或创建
-                imported_module = self._resolve_import(imported, pf.path)
+                imported_module = self._resolve_import(imported)
 
                 if imported_module and imported_module != module_name:
                     if not graph.has_node(imported_module):
@@ -136,7 +136,9 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
             path = path[:-3]
         # 去掉 __init__ 后缀（__init__ 文件即是包本身）
         if path.endswith("__init__"):
-            path = path[:-9] or path[:-8]  # handle trailing dot
+            # Remove __init__ from path: "pkg/__init__" -> "pkg", root "__init__" -> ""
+            parent = path.rsplit("/", 1)[0] if "/" in path else ""
+            return (parent or path).replace("/", ".").replace("\\", ".").strip(".")
         # 路径分隔符转点
         module = path.replace("/", ".").replace("\\", ".")
         # 清理首尾点
@@ -183,14 +185,13 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
         return imports
 
-    def _resolve_import(self, imported: str, current_path: str) -> str | None:
+    def _resolve_import(self, imported: str) -> str | None:
         """解析 import 目标为模块名。
 
         处理相对导入和第三方库过滤。
 
         Args:
             imported: import 语句中的模块名
-            current_path: 当前文件的路径
 
         Returns:
             解析后的模块名，如果为第三方库则返回 None
@@ -227,13 +228,15 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
         return imported
 
     def _analyze_graph(
-        self, graph: "Any", module_names: dict[str, str]
+        self, graph: "Any", module_names: dict[str, str],
+        parsed_files: list[ParsedFile] | None = None,
     ) -> list[dict]:
         """分析依赖图，检测循环依赖和高耦合节点。
 
         Args:
             graph: networkx.DiGraph
             module_names: file_path → module_name 映射
+            parsed_files: 可选，用于基于文件数判断是否启用孤立模块检测
 
         Returns:
             架构问题列表
@@ -327,29 +330,31 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
             })
 
         # --- 检测孤岛模块（出度和入度均为 0）---
-        isolated = [
-            node for node in graph.nodes()
-            if graph.in_degree(node) == 0 and graph.out_degree(node) == 0
-            and node in module_to_path
-        ]
-        if isolated and len(isolated) <= 10:
-            for node in isolated:
-                file_path = module_to_path.get(node, node)
-                issues.append({
-                    "agent_type": self.agent_type,
-                    "severity": "low",
-                    "file_path": file_path,
-                    "line_start": 0,
-                    "line_end": 0,
-                    "category": "module_partitioning",
-                    "title": f"孤立模块: '{node}' 无任何依赖关系",
-                    "description": (
-                        f"模块 '{node}' 既不被其他模块引用，也不依赖任何项目内模块。"
-                        f"可能是未使用的死代码或缺少集成。"
-                    ),
-                    "suggestion": "确认此模块是否仍在使用。如已废弃应移除；如仍需使用应添加适当的集成。",
-                    "code_snippet": "",
-                })
+        # 仅在 ≥ 2 个文件时检测：单文件审查必然出现"孤立模块"误报
+        if parsed_files is None or len(parsed_files) >= 2:
+            isolated = [
+                node for node in graph.nodes()
+                if graph.in_degree(node) == 0 and graph.out_degree(node) == 0
+                and node in module_to_path
+            ]
+            if isolated and len(isolated) <= 10:
+                for node in isolated:
+                    file_path = module_to_path.get(node, node)
+                    issues.append({
+                        "agent_type": self.agent_type,
+                        "severity": "low",
+                        "file_path": file_path,
+                        "line_start": 0,
+                        "line_end": 0,
+                        "category": "module_partitioning",
+                        "title": f"孤立模块: '{node}' 无任何依赖关系",
+                        "description": (
+                            f"模块 '{node}' 既不被其他模块引用，也不依赖任何项目内模块。"
+                            f"可能是未使用的死代码或缺少集成。"
+                        ),
+                        "suggestion": "确认此模块是否仍在使用。如已废弃应移除；如仍需使用应添加适当的集成。",
+                        "code_snippet": "",
+                    })
 
         return issues
 
@@ -423,19 +428,10 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
             return findings
 
-        except (json.JSONDecodeError, Exception) as e:
-            return [{
-                "agent_type": self.agent_type,
-                "severity": "info",
-                "file_path": "",
-                "line_start": 0,
-                "line_end": 0,
-                "category": "llm_error",
-                "title": f"LLM 架构分析失败: {str(e)[:100]}",
-                "description": "推理模型调用失败，仅完成依赖图分析",
-                "suggestion": "请检查 DeepSeek API Key 是否有效",
-                "code_snippet": "",
-            }]
+        except Exception as e:
+            # LLM 失败时静默跳过，避免在问题列表中产生 llm_error 噪声
+            print(f"[ArchitectureAnalyzer] LLM 分析失败，已跳过: {e}")
+            return []
 
     # ---- 主 entry point ----
 
@@ -458,7 +454,7 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
         try:
             import networkx as nx
             graph, module_names = self._build_dependency_graph(parsed_files)
-            graph_issues = self._analyze_graph(graph, module_names)
+            graph_issues = self._analyze_graph(graph, module_names, parsed_files)
             all_issues.extend(graph_issues)
         except ImportError:
             all_issues.append({

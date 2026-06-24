@@ -3,15 +3,26 @@ LLM 统一接入层
 
 封装 LiteLLM，提供统一的模型调用接口。
 通过前缀路由分发到不同后端：智谱 (glm/)、DeepSeek (deepseek/)、Ollama (ollama/)。
+
+注意：litellm 导入较慢，使用懒加载避免阻塞应用启动。
 """
 
 from typing import Any
 
-import litellm
-
 from app.config import get_settings
 
 settings = get_settings()
+
+_litellm = None
+
+
+def _get_litellm():
+    """懒加载 litellm 模块。"""
+    global _litellm
+    if _litellm is None:
+        import litellm as _mod
+        _litellm = _mod
+    return _litellm
 
 
 class LLMProvider:
@@ -107,6 +118,7 @@ class LLMProvider:
         """
         actual_model, api_kwargs = cls._resolve_model(model)
 
+        litellm = _get_litellm()
         return await litellm.acompletion(
             model=actual_model,
             messages=messages,
@@ -150,11 +162,35 @@ class LLMProvider:
         """调用工具模型（默认 ollama/qwen2.5:7b，走本地 Ollama）。
 
         用于风格检查、代码摘要、消息压缩等高频轻量任务。
+
+        降级策略：若本地 Ollama 调用失败（如模型未拉取），自动回退到
+        推理模型（DeepSeek V4），保证审查流水线不会因单一后端不可用
+        而产出 `llm_error` 噪声。
         """
-        return await cls.chat(
-            model=settings.LLM_UTILITY_MODEL,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
-        )
+        primary_model = settings.LLM_UTILITY_MODEL
+        try:
+            return await cls.chat(
+                model=primary_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
+        except Exception as e:
+            # 仅对"本地模型不可用"类错误降级，避免网络抖动时也走远程
+            err_msg = str(e).lower()
+            ollama_indicators = ("not found", "ollama", "connection refused", "connection error")
+            is_local_unavailable = any(k in err_msg for k in ollama_indicators)
+            if primary_model.startswith("ollama/") and is_local_unavailable:
+                print(
+                    f"[LLM] 工具模型 {primary_model} 不可用，"
+                    f"降级到推理模型 {settings.LLM_REASONING_MODEL}: {e}"
+                )
+                return await cls.chat(
+                    model=settings.LLM_REASONING_MODEL,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
+            raise

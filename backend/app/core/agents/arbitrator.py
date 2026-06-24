@@ -18,7 +18,7 @@ from app.integrations.ast_engine import ParsedFile
 # 系统提示词
 # ============================================================
 
-ARBITRATOR_PROMPT = """You are a senior technical lead summarizing the results of an automated code review.
+ARBITRATOR_PROMPT = """You are a senior technical lead summarizing the results of an automated code review for a Chinese-speaking development team.
 Multiple specialized agents have analyzed the codebase and produced findings.
 
 Your task:
@@ -27,14 +27,14 @@ Your task:
 2. **Resolve conflicts**: If two agents disagree about severity or category, use your judgment to decide.
 3. **Prioritize**: Rank issues by importance — consider both severity and impact on the codebase.
 4. **Generate summary**: Write a concise 3-5 sentence summary in Chinese that captures:
-   - Overall code quality assessment
-   - Most critical issues that need immediate attention
-   - Key areas for improvement
+   - Overall code quality assessment (代码整体质量评价)
+   - Most critical issues that need immediate attention (需立即关注的关键问题)
+   - Key areas for improvement (主要改进方向)
 5. **Suggest next steps**: Recommend the order in which issues should be addressed.
 
 Input format:
 You will receive a list of findings from different agents. Each finding has:
-- agent_type: which agent found it
+- agent_type: which agent found it (style/security/architecture/performance/refactor)
 - severity: critical/high/medium/low/info
 - category: the type of issue
 - title: brief description
@@ -43,8 +43,8 @@ You will receive a list of findings from different agents. Each finding has:
 
 Output format (JSON):
 {
-    "summary": "3-5 sentence Chinese summary of the review",
-    "next_steps": ["ordered list of recommended actions"],
+    "summary": "3-5 sentence Chinese summary of the review. Be specific about what was found, not generic.",
+    "next_steps": ["ordered list of recommended actions in Chinese"],
     "key_findings": [
         {
             "title": "consolidated finding title",
@@ -55,7 +55,7 @@ Output format (JSON):
     ]
 }
 
-IMPORTANT: Return ONLY valid JSON. No markdown, no extra text."""
+IMPORTANT: Return ONLY valid JSON. No markdown, no extra text. Write the summary field in Chinese (中文)."""
 
 
 class ArbitratorAgent(BaseReviewAgent):
@@ -246,7 +246,9 @@ class ArbitratorAgent(BaseReviewAgent):
                     f"{ARBITRATOR_PROMPT}\n\n"
                     f"Review statistics:\n{stats_text}\n\n"
                     f"Top issues:\n{top_issues_text}\n\n"
-                    f"Write a 3-5 sentence summary in Chinese."
+                    f"Write a 3-5 sentence summary in Chinese. Be specific about the actual problems found. "
+                    f"If the code has no critical issues, acknowledge that. "
+                    f"Focus on: (1) overall quality level, (2) the most important 1-2 issues, (3) key improvement direction."
                 ),
                 code_context="",  # 不需要代码上下文
                 use_reasoning=True,  # 使用 DeepSeek V4 推理
@@ -344,7 +346,7 @@ class ArbitratorAgent(BaseReviewAgent):
             score_color = "#dc2626"  # 红色
 
         total = len(merged_results)
-        now = datetime.datetime.utcnow().isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         html_parts = [
             '<!DOCTYPE html>',
@@ -401,7 +403,7 @@ class ArbitratorAgent(BaseReviewAgent):
             '<div class="header">',
             f'<h1>代码审查报告</h1>',
             f'<div class="meta">生成时间: {now}</div>',
-            f'<div class="meta">任务 ID: {task_id}</div>',
+            f'<div class="meta">任务 ID: {self._escape_html(task_id)}</div>',
             '<div class="score-section">',
             f'<div class="score-circle" style="background: {score_color};">{score}</div>',
             '<div>',
@@ -413,7 +415,7 @@ class ArbitratorAgent(BaseReviewAgent):
             # Summary
             '<div class="summary-box">',
             '<h2>审查摘要</h2>',
-            f'<p>{summary}</p>',
+            f'<p>{self._escape_html(summary)}</p>',
             '</div>',
             # Statistics
             '<div class="stats-grid">',
@@ -432,7 +434,7 @@ class ArbitratorAgent(BaseReviewAgent):
         for agent, count in stats.get("by_agent", {}).items():
             html_parts.append(
                 f'<div class="stat-card"><div class="count">{count}</div>'
-                f'<div class="label">{agent}</div></div>'
+                f'<div class="label">{self._escape_html(agent)}</div></div>'
             )
 
         html_parts.append('</div></div>')
@@ -464,24 +466,24 @@ class ArbitratorAgent(BaseReviewAgent):
                 html_parts.append(
                     f'<div class="issue-item" style="background: {bg};">'
                     f'<div class="issue-header">'
-                    f'<span class="severity-badge" style="background: {color};">{sev.upper()}</span>'
-                    f'<span class="issue-title">{title}</span>'
+                    f'<span class="severity-badge" style="background: {color};">{self._escape_html(sev.upper())}</span>'
+                    f'<span class="issue-title">{self._escape_html(title)}</span>'
                     f'</div>'
                     f'<div class="issue-meta">'
-                    f'📁 {file_path}:{line_start}-{line_end} '
-                    f'| 🏷️ {category} '
-                    f'| 🤖 {agent_type}'
+                    f'📁 {self._escape_html(file_path)}:{line_start}-{line_end} '
+                    f'| 🏷️ {self._escape_html(category)} '
+                    f'| 🤖 {self._escape_html(agent_type)}'
                     f'</div>'
                 )
 
                 if desc:
                     html_parts.append(
-                        f'<div class="issue-desc">{desc}</div>'
+                        f'<div class="issue-desc">{self._escape_html(desc)}</div>'
                     )
 
                 if suggestion:
                     html_parts.append(
-                        f'<div class="issue-suggestion">💡 {suggestion}</div>'
+                        f'<div class="issue-suggestion">💡 {self._escape_html(suggestion)}</div>'
                     )
 
                 if code_snippet:
