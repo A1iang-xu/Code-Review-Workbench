@@ -37,3 +37,4 @@ backend/uvicorn_output.log
 test_sample.py
 test_api.py
 test_review.ps1
+test_e2e.py

@@ -2,6 +2,8 @@ import axios from 'axios';
 import type {
   ReviewRequest,
   ReviewResponse,
+  ReviewListResponse,
+  ReviewStats,
   SkillExecuteRequest,
   SkillExecuteResponse,
   SkillMeta,
@@ -27,6 +29,14 @@ export const reviewApi = {
     const res = await api.get<ReviewResponse>(`/reviews/${taskId}`);
     return res.data;
   },
+
+  /** 列出审查任务 */
+  list: (params?: { limit?: number; offset?: number }) =>
+    api.get<ReviewListResponse>('/reviews', { params }).then(r => r.data),
+
+  /** 审查统计概览 */
+  stats: () =>
+    api.get<ReviewStats>('/reviews/stats/summary').then(r => r.data),
 };
 
 // ---- Skill API ----

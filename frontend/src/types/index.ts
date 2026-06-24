@@ -60,6 +60,7 @@ export interface ReviewResponse {
   issues?: CodeIssue[];
   agent_timeline?: AgentTimelineStep[];
   files?: { path: string; content: string }[];
+  errors?: string[];
 }
 
 export interface SkillExecuteRequest {
@@ -74,4 +75,26 @@ export interface SkillExecuteResponse {
   summary: string;
   findings: CodeIssue[];
   execution_time_ms: number;
+}
+
+export interface ReviewListItem {
+  task_id: string;
+  repo_url: string;
+  branch: string;
+  status: string;
+  score: number;
+  issues_count: number;
+  created_at: string;
+}
+
+export interface ReviewListResponse {
+  total: number;
+  items: ReviewListItem[];
+}
+
+export interface ReviewStats {
+  total_reviews: number;
+  avg_score: number;
+  active_agents: number;
+  registered_skills: number;
 }

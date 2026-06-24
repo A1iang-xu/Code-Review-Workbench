@@ -9,6 +9,7 @@ parse_code -> [5 个 Agent 并行] -> arbitrate -> generate_report -> END
 """
 
 import datetime
+import time
 import uuid
 from typing import Any
 
@@ -82,6 +83,7 @@ def _parse_files(files: list[dict[str, str]], language: str = "auto") -> list:
 
 async def parse_code_node(state: ReviewState) -> dict[str, Any]:
     """解析所有代码文件节点。"""
+    start_time = time.time()
     memory = _get_memory()
     memory.new_session(max_tokens=4000)
     lang = state.get("language", "auto")
@@ -92,16 +94,19 @@ async def parse_code_node(state: ReviewState) -> dict[str, Any]:
         found = any(pf.path == path for pf in parsed_files)
         if not found:
             errors.append("解析 {} 失败".format(path))
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "agent_reviews",
         "progress": 0.1,
         "_parsed_files": parsed_files,
         "errors": errors,
+        "agent_durations": {"parser": elapsed_ms},
     }
 
 
 async def style_review_node(state: ReviewState) -> dict[str, Any]:
     """风格审查节点。"""
+    start_time = time.time()
     parsed_files = state.get("_parsed_files", [])
     context = _get_agent_context(state)
     agent = StyleCheckerAgent(context)
@@ -111,16 +116,19 @@ async def style_review_node(state: ReviewState) -> dict[str, Any]:
     except Exception as e:
         results = []
         errors = ["风格审查失败: {}".format(e)]
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "agent_reviews",
         "progress": 0.12,
         "style_results": results,
         "errors": errors,
+        "agent_durations": {"style": elapsed_ms},
     }
 
 
 async def security_review_node(state: ReviewState) -> dict[str, Any]:
     """安全审计节点。"""
+    start_time = time.time()
     parsed_files = state.get("_parsed_files", [])
     context = _get_agent_context(state)
     agent = SecurityAuditorAgent(context)
@@ -130,16 +138,19 @@ async def security_review_node(state: ReviewState) -> dict[str, Any]:
     except Exception as e:
         results = []
         errors = ["安全审计失败: {}".format(e)]
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "agent_reviews",
         "progress": 0.12,
         "security_results": results,
         "errors": errors,
+        "agent_durations": {"security": elapsed_ms},
     }
 
 
 async def architecture_review_node(state: ReviewState) -> dict[str, Any]:
     """架构分析节点。"""
+    start_time = time.time()
     parsed_files = state.get("_parsed_files", [])
     context = _get_agent_context(state)
     agent = ArchitectureAnalyzerAgent(context)
@@ -149,16 +160,19 @@ async def architecture_review_node(state: ReviewState) -> dict[str, Any]:
     except Exception as e:
         results = []
         errors = ["架构分析失败: {}".format(e)]
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "agent_reviews",
         "progress": 0.12,
         "architecture_results": results,
         "errors": errors,
+        "agent_durations": {"architecture": elapsed_ms},
     }
 
 
 async def performance_review_node(state: ReviewState) -> dict[str, Any]:
     """性能分析节点。"""
+    start_time = time.time()
     parsed_files = state.get("_parsed_files", [])
     context = _get_agent_context(state)
     agent = PerformanceProfilerAgent(context)
@@ -168,16 +182,19 @@ async def performance_review_node(state: ReviewState) -> dict[str, Any]:
     except Exception as e:
         results = []
         errors = ["性能分析失败: {}".format(e)]
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "agent_reviews",
         "progress": 0.12,
         "performance_results": results,
         "errors": errors,
+        "agent_durations": {"performance": elapsed_ms},
     }
 
 
 async def refactor_review_node(state: ReviewState) -> dict[str, Any]:
     """重构建议节点。"""
+    start_time = time.time()
     parsed_files = state.get("_parsed_files", [])
     context = _get_agent_context(state)
     agent = RefactorAdvisorAgent(context)
@@ -187,16 +204,19 @@ async def refactor_review_node(state: ReviewState) -> dict[str, Any]:
     except Exception as e:
         results = []
         errors = ["重构分析失败: {}".format(e)]
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "agent_reviews",
         "progress": 0.12,
         "refactor_results": results,
         "errors": errors,
+        "agent_durations": {"refactor": elapsed_ms},
     }
 
 
 async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
     """仲裁汇总节点。"""
+    start_time = time.time()
     context = _get_agent_context(state)
     arbitrator = ArbitratorAgent(context)
     style_results = state.get("style_results", [])
@@ -227,6 +247,7 @@ async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
             "report_html": "<p>仲裁汇总失败</p>",
             "stats": {},
         }
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "generate_report",
         "progress": 0.8,
@@ -234,11 +255,13 @@ async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
         "report_score": arbitrated["score"],
         "_merged_results": arbitrated["merged_results"],
         "errors": errors,
+        "agent_durations": {"arbitrator": elapsed_ms},
     }
 
 
 async def generate_report_node(state: ReviewState) -> dict[str, Any]:
     """报告生成节点 - 含记忆保存。"""
+    start_time = time.time()
     context = _get_agent_context(state)
     arbitrator = ArbitratorAgent(context)
 
@@ -312,6 +335,7 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
         except Exception as e:
             print("[Orchestrator] 记忆保存失败: {}".format(e))
 
+    elapsed_ms = int((time.time() - start_time) * 1000)
     return {
         "current_stage": "done",
         "progress": 1.0,
@@ -319,6 +343,7 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
         "report_score": score,
         "report_html": report_html,
         "completed_at": completed_at,
+        "agent_durations": {"report": elapsed_ms},
     }
 
 

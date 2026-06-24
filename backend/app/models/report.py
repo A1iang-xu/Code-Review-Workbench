@@ -6,7 +6,7 @@
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -33,7 +33,7 @@ class ReviewReport(Base):
     full_report_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     full_report_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
 
     # 关联

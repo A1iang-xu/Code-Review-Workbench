@@ -14,6 +14,13 @@ def _last_value(a, b):
     return b
 
 
+def _merge_dicts(a: dict, b: dict) -> dict:
+    """Reducer: 合并两个字典（用于并行节点写入同一字典字段）。"""
+    result = dict(a)
+    result.update(b)
+    return result
+
+
 class ReviewState(TypedDict):
     """审查工作流全局状态。
 
@@ -30,9 +37,9 @@ class ReviewState(TypedDict):
     files: list[dict[str, str]]  # [{"path": "...", "content": "..."}]
 
     # ---- 工作流进度 ----
-    # Annotated 支持并行节点写入：current_stage 取最后值，progress 累加
+    # Annotated 支持并行节点写入：current_stage 取最后值，progress 取最后值（绝对值覆写）
     current_stage: Annotated[str, _last_value]
-    progress: Annotated[float, operator.add]
+    progress: Annotated[float, _last_value]
 
     # ---- Agent 审查结果（Annotated list 支持 += 追加） ----
     style_results: Annotated[list[dict], operator.add]  # StyleChecker 结果
@@ -52,6 +59,10 @@ class ReviewState(TypedDict):
 
     # ---- 错误 ----
     errors: Annotated[list[str], operator.add]
+
+    # ---- Agent 执行耗时（毫秒）----
+    # 并行节点通过 _merge_dicts 合并各自的耗时记录
+    agent_durations: Annotated[dict[str, int], _merge_dicts]
 
     # ---- 时间戳 ----
     started_at: str
