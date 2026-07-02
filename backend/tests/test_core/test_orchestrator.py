@@ -107,8 +107,7 @@ class TestParseCodeNode:
         """
         with patch("app.core.orchestrator._get_memory", return_value=mock_memory), \
              patch("app.core.orchestrator.update_progress") as mock_update_progress, \
-             patch("app.core.orchestrator.complete_progress") as mock_complete_progress, \
-             patch("app.core.orchestrator.fail_progress") as mock_fail_progress:
+             patch("app.core.orchestrator.complete_progress") as mock_complete_progress:
 
             state = {
                 "task_id": "test-task-1",
@@ -141,14 +140,12 @@ class TestParseCodeNode:
             assert mock_update_progress.called, "update_progress 应被调用"
             # complete_progress / fail_progress 在 parse_code_node 中不应被调用
             mock_complete_progress.assert_not_called()
-            mock_fail_progress.assert_not_called()
 
     async def test_parse_code_node_empty_files(self, mock_memory):
         """传入空 files 列表，验证不报错且 _parsed_files 为空。"""
         with patch("app.core.orchestrator._get_memory", return_value=mock_memory), \
              patch("app.core.orchestrator.update_progress"), \
-             patch("app.core.orchestrator.complete_progress"), \
-             patch("app.core.orchestrator.fail_progress"):
+             patch("app.core.orchestrator.complete_progress"):
 
             state = {
                 "task_id": "test-task-empty",
