@@ -1,0 +1,75 @@
+# 版本控制
+.git
+.gitignore
+.gitattributes
+
+# 环境变量与密钥（绝不进镜像）
+.env
+.env.*
+*.env.local
+*.env.production
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+.aws
+.netrc
+.pypirc
+
+# Python 缓存与构建产物
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+
+# 测试与开发工具产物
+tests/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+test_sample.py
+test_api.py
+test_e2e.py
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# IDE 与系统文件
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs/
+
+# 文档（镜像不需要）
+docs/
+*.md
+LICENSE
+
+# Docker 自身文件
+Dockerfile
+.dockerignore
+docker-compose*.yml

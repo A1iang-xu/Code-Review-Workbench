@@ -13,7 +13,7 @@ from typing import Any
 class ModelTier(str, Enum):
     """模型层级枚举。"""
     LOCAL = "local"   # 本地模型（Ollama），预算 4000 tokens
-    CLOUD = "cloud"   # 云端模型（GLM/DeepSeek），预算 64000 tokens
+    CLOUD = "cloud"   # 云端模型（GLM/DeepSeek），预算 16000 tokens
 
 
 @dataclass
@@ -56,7 +56,7 @@ class TokenBudget:
 # 预算表：各层级模型的 token 限额
 BUDGET_TABLE: dict[ModelTier, int] = {
     ModelTier.LOCAL: 4000,
-    ModelTier.CLOUD: 64000,
+    ModelTier.CLOUD: 16000,
 }
 
 

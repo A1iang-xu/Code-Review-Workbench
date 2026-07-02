@@ -14,6 +14,57 @@ from app.integrations.ast_engine import ParsedFile
 
 
 # ============================================================
+# 支持的语言
+# ============================================================
+
+SUPPORTED_LANGUAGES = {"python", "go", "typescript", "javascript", "java"}
+
+# 各语言分支节点类型（用于圈复杂度计算）
+_BRANCH_NODE_TYPES: dict[str, set[str]] = {
+    "python": {
+        "if_statement", "elif_clause", "for_statement", "while_statement",
+        "try_statement", "except_clause", "match_statement", "case_clause",
+        "boolean_operator", "not_operator", "conditional_expression",
+    },
+    "go": {
+        "if_statement", "for_statement", "switch_statement",
+        "type_switch_statement", "case_clause", "select_statement",
+        "binary_expression",  # && / ||
+    },
+    "typescript": {
+        "if_statement", "for_statement", "for_in_statement", "while_statement",
+        "switch_case", "try_statement", "catch_clause",
+        "conditional_expression", "binary_expression",
+    },
+    "javascript": {
+        "if_statement", "for_statement", "for_in_statement", "while_statement",
+        "switch_case", "try_statement", "catch_clause",
+        "conditional_expression", "binary_expression",
+    },
+    "java": {
+        "if_statement", "for_statement", "while_statement",
+        "switch_block", "switch_case", "switch_label",
+        "catch_clause", "conditional_expression", "binary_expression",
+    },
+}
+
+# 各语言函数定义节点类型
+_FUNC_NODE_TYPES: dict[str, tuple[str, ...]] = {
+    "python": ("function_definition", "method_definition"),
+    "go": ("function_declaration", "method_declaration"),
+    "typescript": (
+        "function_declaration", "method_definition",
+        "arrow_function", "function_expression",
+    ),
+    "javascript": (
+        "function_declaration", "method_definition",
+        "arrow_function", "function_expression",
+    ),
+    "java": ("method_declaration", "constructor_declaration"),
+}
+
+
+# ============================================================
 # 系统提示词
 # ============================================================
 
@@ -70,39 +121,19 @@ class PerformanceProfilerAgent(BaseReviewAgent):
         for child in node.children:
             self._walk_with_depth(child, callback, depth + 1)
 
-    def _count_branch_nodes(self, node) -> int:
+    def _count_branch_nodes(self, node, language: str = "python") -> int:
         """统计函数体内的所有分支节点数量。
 
-        分支节点类型：
-        - if_statement (if/elif)
-        - for_statement (for ... in)
-        - while_statement
-        - try_statement (except 子句)
-        - match_statement (Python 3.10+)
-        - boolean_operator (and/or)
-        - not_operator
-        - conditional_expression (x if cond else y)
-        - case_clause (match case)
+        根据语言选择对应的分支节点类型集合。
 
         Args:
             node: 函数定义节点
+            language: 编程语言
 
         Returns:
             分支节点数量
         """
-        branch_node_types = {
-            "if_statement",
-            "elif_clause",
-            "for_statement",
-            "while_statement",
-            "try_statement",   # try 本身引入分支
-            "except_clause",
-            "match_statement",
-            "case_clause",
-            "boolean_operator",    # and / or
-            "not_operator",
-            "conditional_expression",  # x if cond else y
-        }
+        branch_node_types = _BRANCH_NODE_TYPES.get(language, _BRANCH_NODE_TYPES["python"])
 
         count = 0
 
@@ -114,31 +145,46 @@ class PerformanceProfilerAgent(BaseReviewAgent):
         self._walk_with_depth(node, count_branch)
         return count
 
-    def _get_func_name(self, node) -> str:
-        """从函数/方法定义的 AST 节点提取函数名。"""
-        for child in node.children:
-            if child.type == "def":
-                continue
-            if child.type == "identifier":
-                return child.text.decode("utf-8")
-            if child.type == "function_definition":
-                return self._get_func_name(child)
+    def _get_func_name(self, node, language: str = "python") -> str:
+        """从函数/方法定义的 AST 节点提取函数名（多语言支持）。"""
+        if language in ("typescript", "javascript"):
+            for child in node.children:
+                if child.type == "identifier":
+                    return child.text.decode("utf-8")
+                if child.type == "property_identifier":
+                    for grandchild in child.children:
+                        if grandchild.type == "identifier":
+                            return grandchild.text.decode("utf-8")
+            return "<unknown>"
+
+        if language == "python":
+            for child in node.children:
+                if child.type == "def":
+                    continue
+                if child.type == "identifier":
+                    return child.text.decode("utf-8")
+                if child.type == "function_definition":
+                    return self._get_func_name(child, language)
+        elif language in ("go", "java"):
+            for child in node.children:
+                if child.type == "identifier":
+                    return child.text.decode("utf-8")
+
         return "<unknown>"
 
-    def _calculate_cyclomatic_complexity(self, func_node) -> int:
+    def _calculate_cyclomatic_complexity(self, func_node, language: str = "python") -> int:
         """计算函数的圈复杂度。
 
         公式: 1 + 分支节点数
 
-        分支节点包括: if/elif/for/while/try/except/match/case/and/or/not/conditional_expression
-
         Args:
             func_node: 函数定义 AST 节点
+            language: 编程语言
 
         Returns:
             圈复杂度数值（最小为 1）
         """
-        branch_count = self._count_branch_nodes(func_node)
+        branch_count = self._count_branch_nodes(func_node, language)
         return 1 + branch_count
 
     def _complexity_check(self, parsed_file: ParsedFile) -> list[dict]:
@@ -160,7 +206,11 @@ class PerformanceProfilerAgent(BaseReviewAgent):
         if parsed_file.tree is None:
             return issues
 
+        language = parsed_file.language
         root = parsed_file.tree.root_node
+        func_node_types = _FUNC_NODE_TYPES.get(
+            language, _FUNC_NODE_TYPES["python"]
+        )
 
         # 查找所有函数和类方法
         func_nodes: list = []
@@ -175,7 +225,7 @@ class PerformanceProfilerAgent(BaseReviewAgent):
                         find_functions(child)
                 return
 
-            if node.type in ("function_definition", ):
+            if node.type in func_node_types:
                 func_nodes.append((node, class_names[-1] if class_names else "__top__"))
             elif node.type == "class_definition":
                 # 提取类名
@@ -196,8 +246,8 @@ class PerformanceProfilerAgent(BaseReviewAgent):
         find_functions(root)
 
         for func_node, class_name in func_nodes:
-            complexity = self._calculate_cyclomatic_complexity(func_node)
-            func_name = self._get_func_name(func_node)
+            complexity = self._calculate_cyclomatic_complexity(func_node, language)
+            func_name = self._get_func_name(func_node, language)
             start_line = func_node.start_point[0] + 1
             end_line = func_node.end_point[0] + 1
             func_lines = end_line - start_line + 1
@@ -224,7 +274,7 @@ class PerformanceProfilerAgent(BaseReviewAgent):
                 "line_end": end_line,
                 "category": "cyclomatic_complexity",
                 "title": (
-                    f"函数 '{qualified_name}' 圈复杂度过高 "
+                    f"[{language}] 函数 '{qualified_name}' 圈复杂度过高 "
                     f"({complexity}, {func_lines} 行)"
                 ),
                 "description": (
@@ -260,6 +310,7 @@ class PerformanceProfilerAgent(BaseReviewAgent):
             LLM 发现的性能问题列表
         """
         content = parsed_file.content
+        language = parsed_file.language
 
         # 限制长度
         if len(content) > 10000:
@@ -267,7 +318,7 @@ class PerformanceProfilerAgent(BaseReviewAgent):
 
         try:
             response = await self._llm_analyze(
-                prompt=PERFORMANCE_PROMPT,
+                prompt=f"{PERFORMANCE_PROMPT}\n\nAnalyze the following {language} code:",
                 code_context=content,
                 use_reasoning=False,  # 使用本地模型
             )
@@ -321,7 +372,8 @@ class PerformanceProfilerAgent(BaseReviewAgent):
         all_issues: list[dict] = []
 
         for pf in parsed_files:
-            if pf.language != "python":
+            # 仅审查支持的语言
+            if pf.language not in SUPPORTED_LANGUAGES:
                 continue
 
             # 步骤 1: AST 复杂度分析

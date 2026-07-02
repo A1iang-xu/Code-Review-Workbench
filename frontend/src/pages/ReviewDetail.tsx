@@ -1,7 +1,7 @@
 import { type FC, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { reviewApi } from '../services/api';
+import { reviewApi, triggerDownload } from '../services/api';
 import { useReviewProgress } from '../hooks/useSSE';
 import { IssueList } from '../components/review/IssueList';
 import { DiffViewer } from '../components/review/DiffViewer';
@@ -9,7 +9,7 @@ import { AgentTimeline } from '../components/review/AgentTimeline';
 import { ReportPanel } from '../components/review/ReportPanel';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EmptyState } from '../components/common/EmptyState';
-import { Star, AlertTriangle, FileCode, Activity, FileText } from 'lucide-react';
+import { Star, AlertTriangle, FileCode, Activity, FileText, Download } from 'lucide-react';
 import type { CodeIssue } from '../types';
 
 type TabId = 'issues' | 'diff' | 'timeline' | 'report';
@@ -21,16 +21,61 @@ const tabs: { id: TabId; label: string; icon: typeof FileCode }[] = [
   { id: 'report', label: '完整报告', icon: FileText },
 ];
 
+// Map technical stage names to user-friendly Chinese display names
+const getStageDisplayName = (stage: string): string => {
+  const stageMap: Record<string, string> = {
+    pending: '等待中',
+    parse_code: '代码解析',
+    agent_reviews: 'Agent 并行审查',
+    arbitrate: '仲裁汇总',
+    generate_report: '生成报告',
+    done: '完成',
+  };
+  return stageMap[stage] || stage;
+};
+
+// Return the current running agent name based on progress percentage
+const getCurrentAgent = (progress: number): string => {
+  const pct = progress * 100;
+  if (pct < 10) return '代码解析';
+  if (pct < 25) return '风格检查 (style)';
+  if (pct < 35) return '安全审计 (security)';
+  if (pct < 45) return '架构分析 (architecture)';
+  if (pct < 55) return '性能分析 (performance)';
+  if (pct < 65) return '重构建议 (refactor)';
+  if (pct < 90) return '仲裁汇总';
+  return '生成报告';
+};
+
 export const ReviewDetail: FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const [activeTab, setActiveTab] = useState<TabId>('issues');
+  const [exporting, setExporting] = useState<'markdown' | 'pdf' | null>(null);
+
+  const handleExport = async (format: 'markdown' | 'pdf') => {
+    if (exporting || !taskId) return;
+    setExporting(format);
+    try {
+      const blob = await reviewApi.export(taskId, format);
+      const ext = format === 'markdown' ? 'md' : 'html';
+      triggerDownload(blob, `review_${taskId}.${ext}`);
+    } catch (err) {
+      console.error('导出报告失败:', err);
+    } finally {
+      setExporting(null);
+    }
+  };
 
   // Fetch review result
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['review', taskId],
     queryFn: () => reviewApi.get(taskId!),
     enabled: !!taskId,
-    refetchInterval: false,
+    // running/pending 状态下每 3 秒轮询兜底（SSE 断开时仍能更新）
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'running' || status === 'pending' ? 3000 : false;
+    },
   });
 
   // SSE progress
@@ -61,7 +106,10 @@ export const ReviewDetail: FC = () => {
               />
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              当前阶段: {progress.current_stage}
+              当前阶段: {getStageDisplayName(progress.current_stage)}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              正在执行: {getCurrentAgent(progress.progress)}
             </p>
           </div>
         )}
@@ -94,7 +142,10 @@ export const ReviewDetail: FC = () => {
               />
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              当前阶段: {progress.current_stage}
+              当前阶段: {getStageDisplayName(progress.current_stage)}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              正在执行: {getCurrentAgent(progress.progress)}
             </p>
           </div>
         )}
@@ -186,6 +237,25 @@ export const ReviewDetail: FC = () => {
                 </span>
               )}
             </div>
+          </div>
+          {/* Export buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleExport('markdown')}
+              disabled={exporting !== null}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download size={13} />
+              {exporting === 'markdown' ? '导出中...' : '导出 Markdown'}
+            </button>
+            <button
+              onClick={() => handleExport('pdf')}
+              disabled={exporting !== null}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <FileText size={13} />
+              {exporting === 'pdf' ? '导出中...' : '导出 PDF'}
+            </button>
           </div>
         </div>
       </div>

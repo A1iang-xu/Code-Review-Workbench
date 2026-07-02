@@ -7,6 +7,7 @@ LLM 统一接入层
 注意：litellm 导入较慢，使用懒加载避免阻塞应用启动。
 """
 
+import asyncio
 from typing import Any
 
 from app.config import get_settings
@@ -14,6 +15,10 @@ from app.config import get_settings
 settings = get_settings()
 
 _litellm = None
+
+# LLM 调用超时（秒）。单次调用超过此时间将被取消，避免审查流水线无限等待。
+# Ollama 本地推理较慢，预留 120 秒；云端 API 走 self._resolve 配置的 timeout。
+_DEFAULT_LLM_TIMEOUT = 120
 
 
 def _get_litellm():
@@ -101,6 +106,7 @@ class LLMProvider:
         temperature: float = 0.7,
         max_tokens: int = 2048,
         stream: bool = False,
+        timeout: float | None = None,
         **kwargs,
     ) -> Any:
         """通用 LLM 调用方法。
@@ -111,23 +117,51 @@ class LLMProvider:
             temperature: 温度参数
             max_tokens: 最大输出 token 数
             stream: 是否流式输出
+            timeout: 调用超时（秒），None 使用默认 _DEFAULT_LLM_TIMEOUT
             **kwargs: 传递给 litellm.acompletion 的额外参数
 
         Returns:
             litellm 响应对象，或流式生成器
+
+        Raises:
+            asyncio.TimeoutError: 调用超过 timeout 秒未返回
         """
         actual_model, api_kwargs = cls._resolve_model(model)
 
         litellm = _get_litellm()
-        return await litellm.acompletion(
-            model=actual_model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=stream,
-            **api_kwargs,
-            **kwargs,
-        )
+        actual_timeout = timeout if timeout is not None else _DEFAULT_LLM_TIMEOUT
+
+        # 流式调用不支持外层超时包装（异步生成器无法用 wait_for）
+        if stream:
+            return await litellm.acompletion(
+                model=actual_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=stream,
+                **api_kwargs,
+                **kwargs,
+            )
+
+        # 非流式调用：用 asyncio.wait_for 包装超时
+        try:
+            return await asyncio.wait_for(
+                litellm.acompletion(
+                    model=actual_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=False,
+                    **api_kwargs,
+                    **kwargs,
+                ),
+                timeout=actual_timeout,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"LLM 调用超时（{actual_timeout}s）：model={actual_model}, "
+                f"messages={len(messages)} 条"
+            )
 
     @classmethod
     async def reasoning(
@@ -194,3 +228,52 @@ class LLMProvider:
                     **kwargs,
                 )
             raise
+
+    @classmethod
+    async def embedding(
+        cls,
+        text: str,
+        *,
+        model: str | None = None,
+        timeout: float | None = None,
+    ) -> list[float]:
+        """生成文本的向量嵌入。
+
+        用于语义记忆的向量检索。默认调用智谱 embedding-3（2048 维）。
+
+        Args:
+            text: 待向量化的文本
+            model: 模型名（含可选前缀），None 使用 LLM_EMBEDDING_MODEL
+            timeout: 调用超时（秒），None 使用默认 120s
+
+        Returns:
+            浮点向量列表
+
+        Raises:
+            TimeoutError: 调用超时
+            Exception: API 调用失败
+        """
+        target_model = model if model is not None else settings.LLM_EMBEDDING_MODEL
+        actual_model, api_kwargs = cls._resolve_model(target_model)
+
+        litellm = _get_litellm()
+        actual_timeout = timeout if timeout is not None else _DEFAULT_LLM_TIMEOUT
+
+        try:
+            resp = await asyncio.wait_for(
+                litellm.aembedding(
+                    model=actual_model,
+                    input=[text],
+                    **api_kwargs,
+                ),
+                timeout=actual_timeout,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Embedding 调用超时（{actual_timeout}s）：model={actual_model}"
+            )
+
+        # litellm aembedding 返回结构与 OpenAI 一致：resp.data[0]["embedding"]
+        if resp and resp.data:
+            return resp.data[0]["embedding"]
+        raise RuntimeError("Embedding API 返回空响应")

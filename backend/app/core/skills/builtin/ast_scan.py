@@ -62,9 +62,7 @@ class ASTScanSkill(BaseSkill):
                     summary="tree-sitter 或 tree-sitter-python 未安装",
                 )
 
-            parser = tree_sitter.Parser()
-            py_lang = tree_sitter.Language(tspy.language())
-            parser.set_language(py_lang)
+            parser = tree_sitter.Parser(tree_sitter.Language(tspy.language()))
             tree = parser.parse(code.encode("utf-8"))
 
         if tree is None:

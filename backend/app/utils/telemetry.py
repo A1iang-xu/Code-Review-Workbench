@@ -4,11 +4,8 @@ OpenTelemetry 链路追踪
 提供 setup_telemetry() 配置全链路追踪：
 - FastAPI 自动注入 (FastAPIInstrumentor)
 - HTTPX 外部调用追踪 (HTTPXClientInstrumentor)
-- 自定义 Agent Span (trace_agent 装饰器)
+- Agent 自定义 Span 通过 orchestrator._run_agent_with_tracing 内联实现
 """
-
-import functools
-from typing import Callable, Any
 
 from fastapi import FastAPI
 
@@ -79,54 +76,3 @@ def setup_telemetry(app: FastAPI, service_name: str = "code-review-workbench") -
         print(f"[Telemetry] OpenTelemetry SDK 未安装, 跳过追踪配置: {e}")
     except Exception as e:
         print(f"[Telemetry] 配置失败: {e}")
-
-
-# ----------------------------------------------------------------
-# trace_agent decorator
-# ----------------------------------------------------------------
-
-def trace_agent(agent_type: str) -> Callable:
-    """Decorator to create a custom span for an Agent invocation.
-
-    Usage:
-        @trace_agent("style")
-        async def review(self, parsed_files):
-            ...
-
-    The span is named 'agent.{agent_type}' and carries attributes:
-    - agent.type: the agent type string
-    - findings_count: number of findings returned
-
-    Args:
-        agent_type: Agent type string (e.g. 'style', 'security').
-
-    Returns:
-        Decorated async function.
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs) -> Any:
-            from opentelemetry import trace
-
-            tracer = trace.get_tracer(__name__)
-            span_name = f"agent.{agent_type}"
-
-            with tracer.start_as_current_span(span_name) as span:
-                span.set_attribute("agent.type", agent_type)
-
-                try:
-                    result = await func(*args, **kwargs)
-
-                    # Record findings count
-                    if isinstance(result, list):
-                        span.set_attribute("findings_count", len(result))
-
-                    return result
-
-                except Exception as e:
-                    span.set_attribute("error", str(e))
-                    span.set_attribute("error.type", type(e).__name__)
-                    raise
-
-        return wrapper
-    return decorator

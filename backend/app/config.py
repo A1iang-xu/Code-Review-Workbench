@@ -8,7 +8,19 @@
 from pathlib import Path
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# 占位符集合：若敏感字段等于其中任一值，视为"未配置"
+_PLACEHOLDER_VALUES = {
+    "",
+    "change-me-to-a-random-string",
+    "your-zhipu-api-key-here",
+    "your-deepseek-api-key-here",
+    "your-webhook-secret",
+    "crw_secret",
+}
 
 
 class Settings(BaseSettings):
@@ -33,6 +45,45 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "crw"
     POSTGRES_PASSWORD: str = "crw_secret"
 
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> "Settings":
+        """生产环境强制校验敏感字段不能为占位符。
+
+        防止运维忘记配置 .env 导致应用以弱口令/占位符静默启动。
+        开发环境仅打印警告，不阻断启动。
+
+        注意：此处用标准 logging 而非 app.utils.logger，
+        因为后者在模块级 import 时会反向调用 get_settings()，
+        在 Settings 初始化期间形成循环导入。
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+        is_prod = self.APP_ENV.lower() in {"production", "prod"}
+
+        checks = {
+            "SECRET_KEY": self.SECRET_KEY,
+            "POSTGRES_PASSWORD": self.POSTGRES_PASSWORD,
+            "WEBHOOK_SECRET": self.WEBHOOK_SECRET,
+            "ZHIPU_API_KEY": self.ZHIPU_API_KEY,
+            "DEEPSEEK_API_KEY": self.DEEPSEEK_API_KEY,
+        }
+
+        offending = [name for name, val in checks.items() if val in _PLACEHOLDER_VALUES]
+
+        if not offending:
+            return self
+
+        msg = (
+            f"敏感配置使用了占位符或默认值: {offending}. "
+            f"请在 .env 中配置真实值。"
+        )
+
+        if is_prod:
+            raise ValueError(msg)
+        logger.warning("[Config] %s (开发环境继续启动，生产环境将拒绝启动)", msg)
+        return self
+
     @property
     def DATABASE_URL_ASYNC(self) -> str:
         """异步数据库连接串 (asyncpg 驱动)"""
@@ -52,10 +103,6 @@ class Settings(BaseSettings):
     # ---- Redis ----
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # ---- Milvus 向量数据库 ----
-    MILVUS_HOST: str = "localhost"
-    MILVUS_PORT: int = 19530
-
     # ---- LLM 配置 ----
     ZHIPU_API_KEY: str = "your-zhipu-api-key-here"
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
@@ -68,12 +115,13 @@ class Settings(BaseSettings):
 
     LLM_REASONING_MODEL: str = "glm-5.2"
     LLM_UTILITY_MODEL: str = "ollama/qwen2.5:7b"
+    # Embedding 模型（智谱 embedding-3，默认 2048 维），用于语义记忆向量检索
+    LLM_EMBEDDING_MODEL: str = "glm/embedding-3"
 
     # ---- 代码审查配置 ----
     MAX_FILE_SIZE_BYTES: int = 1_048_576       # 1 MB
     MAX_FILES_PER_REVIEW: int = 50
     REVIEW_TIMEOUT_SECONDS: int = 300
-    DEFAULT_LANGUAGES: str = "python,go,typescript,javascript"
 
     # ---- GitHub / GitLab 集成 ----
     GITHUB_TOKEN: str = ""

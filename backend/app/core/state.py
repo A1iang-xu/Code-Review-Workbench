@@ -36,6 +36,10 @@ class ReviewState(TypedDict):
     # ---- 代码文件 ----
     files: list[dict[str, str]]  # [{"path": "...", "content": "..."}]
 
+    # ---- Skill 扫描配置与结果 ----
+    enabled_skills: list[str]  # 本次审查启用的 Skill 名称列表（空 = 不执行 skill 扫描）
+    skill_results: Annotated[list[dict], operator.add]  # Skill 扫描发现的问题
+
     # ---- 工作流进度 ----
     # Annotated 支持并行节点写入：current_stage 取最后值，progress 取最后值（绝对值覆写）
     current_stage: Annotated[str, _last_value]

@@ -51,3 +51,4 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 from app.models.review import ReviewTask, ReviewStatus  # noqa: E402, F401
 from app.models.agent_result import AgentResult  # noqa: E402, F401
 from app.models.report import ReviewReport  # noqa: E402, F401
+from app.models.memory import EpisodicMemoryRecord, SemanticMemoryRecord  # noqa: E402, F401

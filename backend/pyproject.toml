@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.9",  # Alembic 同步驱动（原依赖缺失，迁移会失败）
     "alembic>=1.13.0",
     "redis>=5.0.0",
     "langgraph>=0.2.0",
@@ -19,7 +20,7 @@ dependencies = [
     "pydantic-settings>=2.4.0",
     "httpx>=0.27.0",
     "python-multipart>=0.0.9",
-    "websockets>=12.0",
+    # uvicorn[standard] 已包含 websockets，此处不再单独声明
     "celery>=5.4.0",
     "GitPython>=3.1.40",
     "tree-sitter>=0.23.0",
@@ -27,11 +28,14 @@ dependencies = [
     "networkx>=3.3",
     "radon>=6.0.0",
     "detect-secrets>=1.5.0",
-    "pymilvus>=2.4.0",
     "tiktoken>=0.7.0",
     "opentelemetry-api>=1.25.0",
     "opentelemetry-sdk>=1.25.0",
+    "opentelemetry-exporter-otlp>=1.25.0",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-instrumentation-httpx>=0.45b0",
     "prometheus-client>=0.20.0",
+    "pgvector>=0.3.0",  # 语义记忆向量检索（原为可选 try/except，统一为强依赖）
 ]
 
 [project.optional-dependencies]
@@ -51,3 +55,5 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# test_phase1_manual.py 是手动验收脚本（需后端运行），不属于单元测试，排除收集
+addopts = "--ignore=tests/test_phase1_manual.py"

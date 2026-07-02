@@ -206,9 +206,8 @@ class SemanticChunker:
         except ImportError:
             return boundaries
 
-        parser = tree_sitter.Parser()
         py_lang = tree_sitter.Language(tspy.language())
-        parser.set_language(py_lang)
+        parser = tree_sitter.Parser(py_lang)
 
         tree = parser.parse(code.encode("utf-8"))
         root = tree.root_node

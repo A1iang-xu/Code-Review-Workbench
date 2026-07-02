@@ -41,12 +41,54 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"[{settings.APP_NAME}] Skill 系统初始化失败: {e}")
 
-    # 初始化 OpenTelemetry (需要 Jaeger 运行时才启用)
-    # try:
-    #     from app.utils.telemetry import setup_telemetry
-    #     setup_telemetry(app)
-    # except Exception as e:
-    #     print(f"[{settings.APP_NAME}] Telemetry 初始化失败: {e}")
+    # 初始化 OpenTelemetry（接入 Jaeger，可视化审查流水线耗时）
+    try:
+        from app.utils.telemetry import setup_telemetry
+        setup_telemetry(app)
+    except Exception as e:
+        print(f"[{settings.APP_NAME}] Telemetry 初始化失败: {e}")
+
+    # 预加载 Ollama 模型（避免审查任务首次调用时冷启动延迟）
+    try:
+        import asyncio as _asyncio
+        import httpx
+        from app.config import get_settings as _get_settings
+        _s = _get_settings()
+        _models_to_warm = []
+        if _s.LLM_UTILITY_MODEL.startswith("ollama/"):
+            _models_to_warm.append(_s.LLM_UTILITY_MODEL[len("ollama/"):])
+        if _s.LLM_REASONING_MODEL.startswith("ollama/"):
+            _models_to_warm.append(_s.LLM_REASONING_MODEL[len("ollama/"):])
+        # 额外预热配置中的所有模型（过滤掉系统环境变量污染的路径）
+        for m in (_s.OLLAMA_MODELS or "").split(","):
+            m = m.strip()
+            # 跳过空值和路径（Windows 系统 OLLAMA_MODELS 环境变量可能指向模型存储目录）
+            if not m or "\\" in m or "/" in m or ":" in m[1:]:
+                continue
+            if m not in _models_to_warm:
+                _models_to_warm.append(m)
+        # 若配置中的 OLLAMA_MODELS 被系统环境变量污染（仅含路径），使用默认值
+        if not _models_to_warm:
+            _models_to_warm.extend(["qwen2.5:7b", "deepseek-coder:6.7b"])
+
+        async def _warmup():
+            for model_name in _models_to_warm:
+                try:
+                    async with httpx.AsyncClient(trust_env=False, timeout=30) as client:
+                        resp = await client.post(
+                            f"{_s.OLLAMA_BASE_URL}/api/generate",
+                            json={"model": model_name, "prompt": "hi", "stream": False, "keep_alive": "30m"},
+                        )
+                        if resp.status_code == 200:
+                            print(f"[{_s.APP_NAME}] Ollama 模型预热完成: {model_name}")
+                        else:
+                            print(f"[{_s.APP_NAME}] Ollama 模型预热失败 {model_name}: HTTP {resp.status_code}")
+                except Exception as e:
+                    print(f"[{_s.APP_NAME}] Ollama 模型预热异常 {model_name}: {e}")
+        # 后台执行，不阻塞启动
+        _asyncio.create_task(_warmup())
+    except Exception as e:
+        print(f"[{settings.APP_NAME}] Ollama 预热初始化失败: {e}")
 
     yield
     # 关闭
@@ -61,13 +103,73 @@ app = FastAPI(
 )
 
 # --- CORS 中间件 ---
+# 允许的源从环境变量读取，避免硬编码；生产环境应配置真实域名
+_cors_origins = [
+    o.strip()
+    for o in (
+        settings.APP_ENV.lower() in {"production", "prod"}
+        and __import__("os").getenv("CORS_ORIGINS", "")
+        or "http://localhost:3000,http://127.0.0.1:3000,http://localhost"
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
 )
+
+
+# ============================================================
+# 全局异常处理器 — 统一错误响应格式，避免裸露堆栈泄露内部信息
+# ============================================================
+from fastapi import Request  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from app.utils.logger import get_logger  # noqa: E402
+
+_logger = get_logger(__name__)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """请求参数校验失败 — 返回 422 + 结构化错误详情。"""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": "VALIDATION_ERROR",
+            "message": "请求参数校验失败",
+            "detail": exc.errors(),
+            "path": str(request.url.path),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """未捕获异常兜底 — 记录完整堆栈，对外仅返回通用错误信息。
+
+    生产环境绝不向客户端泄露堆栈，避免暴露内部实现细节。
+    """
+    _logger.exception(
+        "[Unhandled] %s %s -> %s: %s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        exc,
+    )
+    is_prod = settings.APP_ENV.lower() in {"production", "prod"}
+    return JSONResponse(
+        status_code=500,
+        content={
+            "code": "INTERNAL_ERROR",
+            "message": "服务器内部错误" if is_prod else f"服务器内部错误: {exc}",
+            "detail": None if is_prod else str(exc),
+            "path": str(request.url.path),
+        },
+    )
 
 
 # --- 健康检查 ---

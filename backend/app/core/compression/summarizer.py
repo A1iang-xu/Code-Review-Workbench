@@ -126,35 +126,3 @@ class HierarchicalSummarizer:
             )
         except Exception:
             return "包含 " + "、".join(block_summaries[:3])
-
-    # ---- Agent 输出压缩 ----
-
-    @staticmethod
-    def compress_agent_output(
-        findings: list[dict], max_items: int = 20
-    ) -> list[dict]:
-        """按严重等级排序后截断，只保留最重要的 N 条发现。
-
-        Args:
-            findings: 审查发现列表
-            max_items: 保留的最大条数
-
-        Returns:
-            截断后的 finding 列表
-        """
-        if len(findings) <= max_items:
-            return list(findings)
-
-        severity_order = {
-            "critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1,
-        }
-
-        sorted_findings = sorted(
-            findings,
-            key=lambda f: (
-                -severity_order.get(f.get("severity", "info"), 0),
-                f.get("file_path", ""),
-            ),
-        )
-
-        return sorted_findings[:max_items]

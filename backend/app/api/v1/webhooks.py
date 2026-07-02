@@ -138,17 +138,18 @@ async def _run_pr_review(
     sha: str,
     target_branch: str,
 ) -> None:
-    """Background task: fetch PR files, run review, post results back.
+    """Background task: fetch PR diff, run incremental review, post results back.
+
+    使用增量审查（fetch_pr_diff）仅审查 PR 变更部分，而非全量文件。
+    通过 Celery 异步执行，解决 BackgroundTasks 进程重启丢失任务的问题。
 
     Flow:
     1. Set commit status → pending
-    2. Fetch PR changed files
-    3. Filter to code files
-    4. Fetch each file's full content
-    5. Run LangGraph review pipeline
-    6. Post PR review summary
-    7. Post inline comments (max 5 for critical/high)
-    8. Set commit status → success/failure
+    2. Fetch PR diff (仅变更文件)
+    3. Run LangGraph review pipeline (增量审查)
+    4. Post PR review summary
+    5. Post inline comments (max 5 for critical/high)
+    6. Set commit status → success/failure
     """
     gh = GitHubIntegration()
     errors: list[str] = []
@@ -161,98 +162,69 @@ async def _run_pr_review(
             description="Code review in progress...",
         )
 
-        # --- 2. Fetch PR files ---
-        try:
-            pr_files = await gh.get_pr_files(owner, repo, pr_number)
-        except Exception as e:
+        # --- 2. Fetch PR diff (增量审查) ---
+        from app.integrations.repo_fetcher import fetch_pr_diff
+
+        files_for_review, fetch_err = await fetch_pr_diff(owner, repo, pr_number)
+
+        if fetch_err:
             await gh.set_commit_status(
                 owner, repo, sha,
                 state="error",
-                description=f"Failed to fetch PR files: {e}",
+                description=f"Failed to fetch PR diff: {fetch_err[:100]}",
             )
             return
-
-        if not pr_files:
-            await gh.set_commit_status(
-                owner, repo, sha,
-                state="success",
-                description="No files to review",
-            )
-            return
-
-        # --- 3. Filter to code files ---
-        code_files = [f for f in pr_files if _is_code_file(f["filename"])]
-
-        if not code_files:
-            await gh.set_commit_status(
-                owner, repo, sha,
-                state="success",
-                description="No code files to review",
-            )
-            return
-
-        # --- 4. Fetch each file's content ---
-        files_for_review: list[dict[str, str]] = []
-        for f in code_files:
-            try:
-                content = await gh.get_file_content(
-                    owner, repo, f["filename"], ref=target_branch,
-                )
-                files_for_review.append({
-                    "path": f["filename"],
-                    "content": content,
-                })
-            except Exception:
-                # File may be deleted or binary — skip
-                continue
 
         if not files_for_review:
             await gh.set_commit_status(
                 owner, repo, sha,
                 state="success",
-                description="No reviewable content found",
+                description="No code changes to review",
             )
             return
 
-        # --- 5. Run the review pipeline ---
-        from app.core.orchestrator import review_graph
-        from app.core.state import ReviewState
+        # --- 3. Run the review pipeline (via Celery) ---
+        from app.core.tasks import run_review_task
+        import datetime
 
         task_id = f"pr-{owner}-{repo}-{pr_number}"
+        started_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        initial_state: ReviewState = {
-            "task_id": task_id,
+        request_data = {
             "repo_url": f"https://github.com/{owner}/{repo}",
             "branch": target_branch,
             "language": "auto",
             "files": files_for_review,
-            "current_stage": "parse_code",
-            "progress": 0.0,
-            "style_results": [],
-            "security_results": [],
-            "architecture_results": [],
-            "performance_results": [],
-            "refactor_results": [],
-            "_parsed_files": [],
-            "_merged_results": [],
-            "report_summary": "",
-            "report_score": 0.0,
-            "report_html": "",
-            "errors": [],
-            "started_at": "",
-            "completed_at": "",
         }
 
-        try:
-            final_state = await review_graph.ainvoke(initial_state)
-        except Exception as e:
-            errors.append(f"Review pipeline failed: {e}")
-            final_state = {}
+        # 通过 Celery 异步执行增量审查
+        run_review_task.delay(
+            task_id=task_id,
+            request_data=request_data,
+            started_at=started_at,
+        )
 
-        # --- 6. Build and post PR review ---
-        summary = final_state.get("report_summary", "Review completed with errors.")
-        score = final_state.get("report_score", 0.0)
-        merged = final_state.get("_merged_results", [])
+        # 等待 Celery 任务完成（轮询结果）
+        # 注意：这里使用同步等待，因为 Webhook 需要最终状态
+        # 实际生产中可改为异步回调
+        from app.core.celery_app import celery_app
+        result = run_review_task.AsyncResult(task_id)
+
+        try:
+            review_result = result.get(timeout=settings.REVIEW_TIMEOUT_SECONDS)
+        except Exception as e:
+            errors.append(f"Celery task failed: {e}")
+            review_result = {}
+
+        # --- 4. Build and post PR review ---
+        summary = review_result.get("summary", "Review completed with errors.")
+        score = review_result.get("score", 0.0)
+        issues_count = review_result.get("issues_count", 0)
+
+        # 从数据库加载完整结果获取 issues 详情
+        from app.api.v1.reviews import _load_from_db
+        db_data = await _load_from_db(task_id)
+        merged = db_data.get("issues", []) if db_data else []
 
         # Count severities
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
@@ -261,12 +233,8 @@ async def _run_pr_review(
             severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
         # Build stats
-        all_results = []
-        for key in ["style_results", "security_results", "architecture_results",
-                     "performance_results", "refactor_results"]:
-            all_results.extend(final_state.get(key, []))
         agent_stats = {}
-        for r in all_results:
+        for r in merged:
             at = r.get("agent_type", "unknown")
             agent_stats[at] = agent_stats.get(at, 0) + 1
 
@@ -275,7 +243,7 @@ async def _run_pr_review(
             summary=summary,
             score=score,
             severity_counts=severity_counts,
-            issue_count=len(merged),
+            issue_count=issues_count,
             stats={"by_agent": agent_stats},
         )
 
@@ -292,7 +260,7 @@ async def _run_pr_review(
         except Exception as e:
             errors.append(f"Failed to post PR review: {e}")
 
-        # --- 7. Post inline comments (max 5, critical/high only) ---
+        # --- 5. Post inline comments (max 5, critical/high only) ---
         inline_count = 0
         for issue in merged:
             if inline_count >= 5:
@@ -306,10 +274,6 @@ async def _run_pr_review(
             if not file_path or line <= 0:
                 continue
 
-            # Check the file is among PR changed files
-            if not any(cf["filename"] == file_path for cf in code_files):
-                continue
-
             comment_body = _build_inline_comment(issue)
             try:
                 await gh.create_review_comment(
@@ -320,17 +284,16 @@ async def _run_pr_review(
                 )
                 inline_count += 1
             except Exception:
-                # Skip failed inline comments
                 continue
 
-        # --- 8. Set final commit status ---
+        # --- 6. Set final commit status ---
         final_state_str = "success" if not errors else "error"
         await gh.set_commit_status(
             owner, repo, sha,
             state=final_state_str,
             description=(
                 f"Review complete — Score: {score}/10, "
-                f"{len(merged)} issues"
+                f"{issues_count} issues"
             ),
         )
 
@@ -372,8 +335,19 @@ async def github_webhook(
     # Read raw body for signature verification
     raw_body = await request.body()
 
-    # Verify signature if WEBHOOK_SECRET is configured
-    if settings.WEBHOOK_SECRET and settings.WEBHOOK_SECRET != "your-webhook-secret":
+    # 校验 GitHub Webhook 签名
+    # - 若 WEBHOOK_SECRET 未配置或为占位符 → 拒绝（生产安全要求必须配置）
+    # - 若已配置 → 强制 HMAC 校验，签名不匹配返回 403
+    webhook_secret = settings.WEBHOOK_SECRET
+    _PLACEHOLDER = "your-webhook-secret"
+    if not webhook_secret or webhook_secret == _PLACEHOLDER:
+        # 开发环境放行（方便本地调试），生产环境严格拒绝
+        if settings.APP_ENV.lower() in {"production", "prod"}:
+            raise HTTPException(
+                status_code=500,
+                detail="WEBHOOK_SECRET 未配置或仍为占位符，生产环境禁止此行为",
+            )
+    else:
         if not GitHubIntegration.verify_signature(raw_body, x_hub_signature_256):
             raise HTTPException(status_code=403, detail="Invalid webhook signature")
 
@@ -434,11 +408,22 @@ async def gitlab_webhook(
     Processes Merge Request Hook events.
     The review runs asynchronously via BackgroundTasks.
     """
-    # Optional token verification
-    if settings.GITLAB_TOKEN and x_gitlab_token:
-        # GitLab sends a secret token in X-Gitlab-Token header
-        # Simple string comparison; for HMAC see project-level settings
-        pass  # Token check is optional for GitLab
+    # 校验 GitLab Webhook token（X-Gitlab-Token）
+    # - 生产环境：必须配置 GITLAB_TOKEN 且与请求头匹配，否则拒绝
+    # - 开发环境：若 GITLAB_TOKEN 未配置则放行；若已配置但请求头不匹配则拒绝
+    import secrets as _secrets
+
+    if not settings.GITLAB_TOKEN:
+        if settings.APP_ENV.lower() in {"production", "prod"}:
+            raise HTTPException(
+                status_code=500,
+                detail="GITLAB_TOKEN 未配置，生产环境禁止此行为",
+            )
+    else:
+        if not x_gitlab_token or not _secrets.compare_digest(
+            x_gitlab_token, settings.GITLAB_TOKEN
+        ):
+            raise HTTPException(status_code=403, detail="Invalid GitLab webhook token")
 
     if x_gitlab_event != "Merge Request Hook":
         return {"message": f"Event '{x_gitlab_event}' ignored"}

@@ -17,6 +17,69 @@ from app.integrations.ast_engine import ParsedFile
 
 
 # ============================================================
+# 支持的语言
+# ============================================================
+
+SUPPORTED_LANGUAGES = {"python", "go", "typescript", "javascript", "java"}
+
+# 各语言文件后缀
+_LANGUAGE_EXTENSIONS: dict[str, str] = {
+    "python": ".py",
+    "go": ".go",
+    "typescript": ".ts",
+    "javascript": ".js",
+    "java": ".java",
+}
+
+# 各语言标准库/第三方库顶层包名（用于过滤外部依赖）
+_STDLIB_AND_THIRD_PARTY: dict[str, set[str]] = {
+    "python": {
+        "os", "sys", "re", "json", "math", "datetime", "collections",
+        "itertools", "functools", "typing", "abc", "pathlib", "io",
+        "subprocess", "logging", "hashlib", "base64", "uuid", "copy",
+        "enum", "dataclasses", "asyncio", "threading", "multiprocessing",
+        "http", "urllib", "socket", "ssl", "email", "csv", "xml",
+        "argparse", "configparser", "unittest", "traceback", "warnings",
+        "contextlib", "inspect", "ast", "textwrap", "shutil", "tempfile",
+        "pickle", "marshal", "struct", "sqlite3", "random", "statistics",
+        "time", "platform", "signal", "atexit", "gc", "types",
+        # 常见第三方库
+        "fastapi", "uvicorn", "sqlalchemy", "alembic", "pydantic",
+        "langgraph", "langchain", "litellm", "starlette", "networkx",
+        "tree_sitter", "semgrep", "radon", "redis", "celery",
+        "httpx", "tiktoken", "opentelemetry",
+        "prometheus_client", "websockets", "git", "numpy", "pandas",
+        "requests", "aiohttp", "transformers", "torch", "tensorflow",
+    },
+    "go": {
+        "fmt", "os", "io", "net", "http", "strings", "strconv", "errors",
+        "context", "sync", "time", "math", "sort", "path", "filepath",
+        "encoding", "crypto", "log", "runtime", "reflect", "unsafe",
+        "database", "testing", "flag", "bytes", "bufio", "regexp",
+        # 第三方
+        "github", "golang.org", "gopkg.in", "google.golang.org",
+    },
+    "typescript": {
+        "react", "vue", "axios", "lodash", "express", "next", "nuxt",
+        "typescript", "rxjs", "moment", "uuid", "zod", "yup",
+        "fs", "path", "http", "https", "crypto", "os", "url", "util",
+        "child_process", "stream", "events", "buffer", "querystring",
+    },
+    "javascript": {
+        "react", "vue", "axios", "lodash", "express", "next", "nuxt",
+        "moment", "uuid", "zod", "yup", "chalk", "commander",
+        "fs", "path", "http", "https", "crypto", "os", "url", "util",
+        "child_process", "stream", "events", "buffer", "querystring",
+    },
+    "java": {
+        "java", "javax", "org", "com", "sun", "jdk",
+        "spring", "hibernate", "apache", "junit", "mockito", "lombok",
+        "slf4j", "log4j", "jackson", "gson", "guava", "reactor",
+    },
+}
+
+
+# ============================================================
 # 系统提示词
 # ============================================================
 
@@ -70,6 +133,7 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
         遍历所有文件的 import 语句，构建有向图。
         节点为模块名（文件路径去后缀），边为 import 依赖。
+        支持多语言（Python/Go/TypeScript/JavaScript/Java）。
 
         Args:
             parsed_files: 已解析的文件列表
@@ -85,11 +149,11 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
         module_names: dict[str, str] = {}  # file_path → module_name
 
         for pf in parsed_files:
-            if pf.language != "python":
+            if pf.language not in SUPPORTED_LANGUAGES:
                 continue
 
             # 将文件路径转换为模块名
-            module_name = self._path_to_module(pf.path)
+            module_name = self._path_to_module(pf.path, pf.language)
             module_names[pf.path] = module_name
 
             if not graph.has_node(module_name):
@@ -99,15 +163,15 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
         # 第二轮：提取 import 关系
         for pf in parsed_files:
-            if pf.language != "python" or pf.tree is None:
+            if pf.language not in SUPPORTED_LANGUAGES:
                 continue
 
             module_name = module_names[pf.path]
-            imports = self._extract_imports(pf.content)
+            imports = self._extract_imports(pf.content, pf.language)
 
             for imported in imports:
                 # 将 import 路径转换为模块名并在图中找到或创建
-                imported_module = self._resolve_import(imported)
+                imported_module = self._resolve_import(imported, pf.language)
 
                 if imported_module and imported_module != module_name:
                     if not graph.has_node(imported_module):
@@ -118,25 +182,29 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
         return graph, module_names
 
-    def _path_to_module(self, file_path: str) -> str:
+    def _path_to_module(self, file_path: str, language: str = "python") -> str:
         """将文件路径转换为模块名。
 
-        e.g., 'app/core/agents/security.py' → 'app.core.agents.security'
-              'src/utils/helpers.py' → 'src.utils.helpers'
+        支持多语言文件后缀：
+        - Python: 'app/core/agents/security.py' → 'app.core.agents.security'
+        - Go: 'cmd/main.go' → 'cmd.main'
+        - TS/JS: 'src/utils/helpers.ts' → 'src.utils.helpers'
+        - Java: 'com/example/Main.java' → 'com.example.Main'
 
         Args:
             file_path: 文件路径
+            language: 编程语言
 
         Returns:
             模块名（点分隔）
         """
-        # 去掉后缀
         path = file_path
-        if path.endswith(".py"):
-            path = path[:-3]
-        # 去掉 __init__ 后缀（__init__ 文件即是包本身）
-        if path.endswith("__init__"):
-            # Remove __init__ from path: "pkg/__init__" -> "pkg", root "__init__" -> ""
+        ext = _LANGUAGE_EXTENSIONS.get(language, ".py")
+        # 去掉对应后缀
+        if path.endswith(ext):
+            path = path[:-len(ext)]
+        # Python __init__ 特殊处理
+        if language == "python" and path.endswith("__init__"):
             parent = path.rsplit("/", 1)[0] if "/" in path else ""
             return (parent or path).replace("/", ".").replace("\\", ".").strip(".")
         # 路径分隔符转点
@@ -144,21 +212,34 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
         # 清理首尾点
         return module.strip(".")
 
-    def _extract_imports(self, content: str) -> list[str]:
-        """从 Python 源代码中提取所有 import 目标。
+    def _extract_imports(self, content: str, language: str = "python") -> list[str]:
+        """从源代码中提取所有 import 目标（多语言支持）。
 
         支持:
-        - import X, import X.Y
-        - from X import Y, from X.Y import Z
-        - from .X import Y (相对导入)
-        - from ..X import Y (多级相对导入)
+        - Python: import X, from X import Y, 相对导入
+        - Go: import "pkg", import ( ... )
+        - TypeScript/JavaScript: import X from "pkg", require("pkg")
+        - Java: import pkg.Class;
 
         Args:
             content: 源代码文本
+            language: 编程语言
 
         Returns:
             导入模块名列表
         """
+        if language == "python":
+            return self._extract_python_imports(content)
+        elif language == "go":
+            return self._extract_go_imports(content)
+        elif language in ("typescript", "javascript"):
+            return self._extract_ts_js_imports(content)
+        elif language == "java":
+            return self._extract_java_imports(content)
+        return []
+
+    def _extract_python_imports(self, content: str) -> list[str]:
+        """从 Python 源代码中提取所有 import 目标。"""
         imports: list[str] = []
 
         # import X, import X.Y, import X as Z
@@ -185,45 +266,120 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
         return imports
 
-    def _resolve_import(self, imported: str) -> str | None:
+    def _extract_go_imports(self, content: str) -> list[str]:
+        """从 Go 源代码中提取所有 import 目标。
+
+        支持:
+        - import "fmt"
+        - import f "fmt" (别名)
+        - import (\n\t"fmt"\n\t"github.com/x/y"\n)
+        """
+        imports: list[str] = []
+
+        # 单行 import "pkg"
+        for m in re.finditer(r'^\s*import\s+(?:\w+\s+)?["`]([^"`]+)["`]', content, re.MULTILINE):
+            imports.append(m.group(1))
+
+        # 块 import ( ... )
+        block_match = re.search(r'import\s*\(([^)]+)\)', content, re.DOTALL)
+        if block_match:
+            block = block_match.group(1)
+            for m in re.finditer(r'["`]([^"`]+)["`]', block):
+                imports.append(m.group(1))
+
+        return imports
+
+    def _extract_ts_js_imports(self, content: str) -> list[str]:
+        """从 TypeScript/JavaScript 源代码中提取所有 import 目标。
+
+        支持:
+        - import X from "pkg"
+        - import { X } from "pkg"
+        - import "pkg"
+        - const X = require("pkg")
+        """
+        imports: list[str] = []
+
+        # import ... from "pkg" / import "pkg"
+        for m in re.finditer(
+            r'^\s*import\s+(?:[^"\';]+\s+from\s+)?["\']([^"\']+)["\']',
+            content,
+            re.MULTILINE,
+        ):
+            imports.append(m.group(1))
+
+        # require("pkg")
+        for m in re.finditer(r'require\s*\(\s*["\']([^"\']+)["\']\s*\)', content):
+            imports.append(m.group(1))
+
+        return imports
+
+    def _extract_java_imports(self, content: str) -> list[str]:
+        """从 Java 源代码中提取所有 import 目标。
+
+        支持:
+        - import com.example.Class;
+        - import com.example.*;
+        """
+        imports: list[str] = []
+
+        for m in re.finditer(
+            r'^\s*import\s+(?:static\s+)?([\w.]+)\s*;',
+            content,
+            re.MULTILINE,
+        ):
+            imports.append(m.group(1))
+
+        return imports
+
+    def _resolve_import(self, imported: str, language: str = "python") -> str | None:
         """解析 import 目标为模块名。
 
-        处理相对导入和第三方库过滤。
+        根据语言过滤标准库和第三方库。
 
         Args:
             imported: import 语句中的模块名
+            language: 编程语言
 
         Returns:
-            解析后的模块名，如果为第三方库则返回 None
+            解析后的模块名，如果为标准库/第三方库则返回 None
         """
-        # 过滤标准库和第三方库
-        stdlib_top = {
-            "os", "sys", "re", "json", "math", "datetime", "collections",
-            "itertools", "functools", "typing", "abc", "pathlib", "io",
-            "subprocess", "logging", "hashlib", "base64", "uuid", "copy",
-            "enum", "dataclasses", "asyncio", "threading", "multiprocessing",
-            "http", "urllib", "socket", "ssl", "email", "csv", "xml",
-            "argparse", "configparser", "unittest", "traceback", "warnings",
-            "contextlib", "inspect", "ast", "textwrap", "shutil", "tempfile",
-            "pickle", "marshal", "struct", "sqlite3", "random", "statistics",
-            "time", "platform", "signal", "atexit", "gc", "types",
-        }
+        stdlib = _STDLIB_AND_THIRD_PARTY.get(language, set())
 
-        top_level = imported.split(".")[0]
-        if top_level in stdlib_top:
-            return None
+        # Python: 取顶层包名（点分隔的第一段）
+        if language == "python":
+            top_level = imported.split(".")[0]
+            if top_level in stdlib:
+                return None
+            return imported
 
-        # 常见第三方库
-        third_party = {
-            "fastapi", "uvicorn", "sqlalchemy", "alembic", "pydantic",
-            "langgraph", "langchain", "litellm", "starlette", "networkx",
-            "tree_sitter", "semgrep", "radon", "redis", "celery",
-            "httpx", "pymilvus", "tiktoken", "opentelemetry",
-            "prometheus_client", "websockets", "git", "numpy", "pandas",
-            "requests", "aiohttp", "transformers", "torch", "tensorflow",
-        }
-        if top_level in third_party:
-            return None
+        # Go: 取路径第一段或域名段
+        if language == "go":
+            parts = imported.split("/")
+            top_level = parts[0]
+            if top_level in stdlib:
+                return None
+            # 项目内包：返回完整路径
+            return imported.replace("/", ".")
+
+        # TS/JS: 取包名（非路径形式）
+        if language in ("typescript", "javascript"):
+            # 相对路径导入 (./ 或 ../) 视为项目内
+            if imported.startswith("."):
+                return imported.replace("/", ".").strip(".")
+            top_level = imported.split("/")[0]
+            if top_level in stdlib:
+                return None
+            return imported
+
+        # Java: 取包名前两段
+        if language == "java":
+            parts = imported.split(".")
+            if len(parts) >= 2:
+                top_level = parts[0]
+                if top_level in stdlib:
+                    return None
+            return imported
 
         return imported
 
@@ -366,6 +522,7 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
         """使用推理模型（DeepSeek V4）进行架构评估。
 
         关注模块划分、接口设计、设计模式、内聚性等图分析难以覆盖的维度。
+        支持多语言（Python/Go/TypeScript/JavaScript/Java）。
 
         Args:
             parsed_files: 已解析的文件列表
@@ -374,17 +531,27 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
             LLM 发现的架构问题列表
         """
         # 构建代码概要（文件列表 + 类/函数签名摘要）
+        # 各语言类/函数定义的关键字
+        def_prefixes = {
+            "python": ("class ", "def ", "async def "),
+            "go": ("func ", "type ", "struct{"),
+            "typescript": ("class ", "function ", "interface ", "type ", "export "),
+            "javascript": ("class ", "function ", "export "),
+            "java": ("class ", "interface ", "enum ", "@interface"),
+        }
+
         code_summary_parts: list[str] = []
         for pf in parsed_files:
-            if pf.language != "python":
+            if pf.language not in SUPPORTED_LANGUAGES:
                 continue
+            prefixes = def_prefixes.get(pf.language, def_prefixes["python"])
             # 提取关键信息
             lines = pf.content.split("\n")
             class_func_lines = [
                 ln for ln in lines
-                if ln.strip().startswith(("class ", "def ", "async def "))
+                if ln.strip().startswith(prefixes)
             ]
-            summary = f"# {pf.path} ({len(lines)} lines)\n"
+            summary = f"# {pf.path} [{pf.language}] ({len(lines)} lines)\n"
             summary += "\n".join(class_func_lines[:30])  # 最多 30 个签名
             code_summary_parts.append(summary)
 

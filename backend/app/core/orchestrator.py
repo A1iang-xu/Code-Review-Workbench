@@ -6,6 +6,9 @@ parse_code -> [5 个 Agent 并行] -> arbitrate -> generate_report -> END
 
 阶段三：集成记忆系统 - AgentContext 注入 memory_context，
 审查完成后自动保存情节记忆和程序性记忆。
+
+阶段四：集成压缩系统 - parse_code_node 后调用 SemanticChunker 分块，
+Agent 调用前通过 TokenQuotaManager 检查 token 配额。
 """
 
 import datetime
@@ -25,6 +28,56 @@ from app.core.agents.arbitrator import ArbitratorAgent
 from app.core.memory import MemoryManager
 from app.core.state import ReviewState
 from app.integrations.ast_engine import ASTEngine
+from app.core.compression.chunker import SemanticChunker
+from app.core.compression.token_manager import TokenQuotaManager
+from app.core.skills.executor import SkillExecutor
+from app.api.v1.ws import update_progress, complete_progress, fail_progress
+
+
+# ============================================================
+# OpenTelemetry span 辅助函数
+# ============================================================
+
+async def _run_agent_with_tracing(agent, agent_type: str, parsed_files):
+    """带 OpenTelemetry span 的 Agent 调用。
+
+    自动记录执行耗时和发现数量到 span。
+    """
+    start_time = time.time()
+    try:
+        from opentelemetry import trace
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span(f"agent.{agent_type}") as span:
+            span.set_attribute("agent.type", agent_type)
+            results = await agent.review(parsed_files)
+            span.set_attribute("findings_count", len(results))
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            span.set_attribute("duration_ms", elapsed_ms)
+            return results, []
+    except ImportError:
+        # OpenTelemetry 未安装，直接调用
+        results = await agent.review(parsed_files)
+        return results, []
+    except Exception as e:
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        try:
+            from opentelemetry import trace
+            span = trace.get_current_span()
+            if span:
+                span.set_attribute("error", str(e))
+                span.set_attribute("error.type", type(e).__name__)
+                span.set_attribute("duration_ms", elapsed_ms)
+        except ImportError:
+            pass
+        return [], [f"{agent_type} 审查失败: {e}"]
+
+
+# ============================================================
+# 压缩系统单例
+# ============================================================
+
+_chunker = SemanticChunker()
+_token_manager = TokenQuotaManager()
 
 
 # ============================================================
@@ -36,12 +89,80 @@ def _get_memory() -> MemoryManager:
     return MemoryManager(storage_path="./memory_data")
 
 
-def _get_agent_context(state: ReviewState) -> AgentContext:
-    """创建带记忆上下文的 AgentContext。"""
+def _get_agent_context(state: ReviewState, agent_type: str = "") -> AgentContext:
+    """创建带记忆上下文和压缩系统的 AgentContext。
+
+    使用 get_context_for_review() 根据当前审查的语言、文件路径和 Agent 类型
+    生成针对性记忆上下文，让记忆真正影响后续审查。
+
+    注意：原实现在异步上下文中调用 loop.run_until_complete 会被静默吞错，
+    导致针对性记忆上下文从未生效。此处改用独立线程跑独立事件循环，
+    与主线程的事件循环互不干扰，确保记忆上下文真正被获取。
+
+    Args:
+        state: 审查工作流状态
+        agent_type: 当前 Agent 类型，用于激活 episodic 定向历史检索
+    """
+    import asyncio
+    import threading
+
     memory = _get_memory()
+    # 同步获取基础上下文（从缓存）
+    memory_context = memory.get_system_context()
+
+    # 在独立线程中跑独立事件循环，无论主线程是否有正在运行的循环都能正确执行
+    language = state.get("language", "auto")
+    file_paths = [f["path"] for f in state.get("files", [])]
+
+    # 按 Agent 类型映射 categories，激活 episodic 定向历史检索
+    _AGENT_CATEGORIES: dict[str, list[str]] = {
+        "style": ["style"],
+        "security": ["security"],
+        "architecture": ["architecture"],
+        "performance": ["performance"],
+        "refactor": ["refactor"],
+        "arbitrator": ["security", "performance", "architecture"],
+    }
+    categories = _AGENT_CATEGORIES.get(agent_type) if agent_type else None
+
+    result_holder: dict = {"context": memory_context, "error": None}
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            result_holder["context"] = loop.run_until_complete(
+                memory.get_context_for_review(
+                    language=language,
+                    file_paths=file_paths,
+                    categories=categories,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            result_holder["error"] = e
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_runner, name="memory-context-fetch")
+    t.start()
+    t.join()
+
+    if result_holder["error"] is not None:
+        # 记忆上下文获取失败时降级到系统缓存上下文，不阻塞主流程
+        from app.utils.logger import get_logger
+
+        logger = get_logger(__name__)
+        logger.warning(
+            "[Orchestrator] 获取针对性记忆上下文失败，降级到系统缓存: %s",
+            result_holder["error"],
+        )
+    else:
+        memory_context = result_holder["context"]
+
     return AgentContext(
-        memory_context=memory.get_system_context(),
+        memory_context=memory_context,
         language=state.get("language", "auto"),
+        chunker=_chunker,
+        token_manager=_token_manager,
     )
 
 
@@ -82,10 +203,25 @@ def _parse_files(files: list[dict[str, str]], language: str = "auto") -> list:
 # ============================================================
 
 async def parse_code_node(state: ReviewState) -> dict[str, Any]:
-    """解析所有代码文件节点。"""
+    """解析所有代码文件节点。
+
+    阶五集成：刷新记忆缓存，确保 get_system_context 返回最新数据。
+    注：压缩分块由 Agent 内部 _compress_code_context 按需触发，
+    无需在此预分块（原 _file_chunks 从未被 Agent 消费，已移除）。
+    """
     start_time = time.time()
+    task_id = state.get("task_id", "")
+    if task_id:
+        update_progress(task_id, 0.05, "parse_code", "running")
     memory = _get_memory()
     memory.new_session(max_tokens=4000)
+
+    # 刷新记忆缓存（从 PostgreSQL 加载语义记忆和最近审查记录）
+    try:
+        await memory.async_refresh()
+    except Exception as e:
+        print("[Orchestrator] 记忆缓存刷新失败: {}".format(e))
+
     lang = state.get("language", "auto")
     parsed_files = _parse_files(state.get("files", []), language=lang)
     errors = []
@@ -94,9 +230,12 @@ async def parse_code_node(state: ReviewState) -> dict[str, Any]:
         found = any(pf.path == path for pf in parsed_files)
         if not found:
             errors.append("解析 {} 失败".format(path))
+
     elapsed_ms = int((time.time() - start_time) * 1000)
+    if task_id:
+        update_progress(task_id, 0.1, "skill_scan", "running")
     return {
-        "current_stage": "agent_reviews",
+        "current_stage": "skill_scan",
         "progress": 0.1,
         "_parsed_files": parsed_files,
         "errors": errors,
@@ -104,120 +243,121 @@ async def parse_code_node(state: ReviewState) -> dict[str, Any]:
     }
 
 
-async def style_review_node(state: ReviewState) -> dict[str, Any]:
-    """风格审查节点。"""
+async def skill_scan_node(state: ReviewState) -> dict[str, Any]:
+    """Skill 扫描节点（可选）。
+
+    当 ReviewState.enabled_skills 非空时，对每个已解析文件并行执行选中的
+    Skill，收集发现（标记 source='skill'）。结果存入 state.skill_results，
+    在 generate_report 节点与 Agent 发现合并进最终报告。
+
+    enabled_skills 为空时直接跳过，不阻塞主流程。
+    """
+    enabled = state.get("enabled_skills", [])
+    if not enabled:
+        return {}
+
     start_time = time.time()
+    task_id = state.get("task_id", "")
+    if task_id:
+        update_progress(task_id, 0.12, "skill_scan", "running")
+
     parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context(state)
-    agent = StyleCheckerAgent(context)
-    try:
-        results = await agent.review(parsed_files)
-        errors = []
-    except Exception as e:
-        results = []
-        errors = ["风格审查失败: {}".format(e)]
+    executor = SkillExecutor()
+    all_findings: list[dict] = []
+
+    for pf in parsed_files:
+        try:
+            results = await executor.execute_all(
+                skill_names=enabled,
+                code=pf.content,
+                file_path=pf.path,
+            )
+            for skill_name, result in results.items():
+                if not result.success:
+                    continue
+                for finding in result.findings:
+                    # 标记来源为 skill，供报告区分
+                    finding["source"] = "skill"
+                    finding["skill_name"] = skill_name
+                    finding.setdefault("agent_type", "skill")
+                    finding.setdefault("file_path", pf.path)
+                    all_findings.append(finding)
+        except Exception as e:
+            print("[Orchestrator] Skill 扫描 {} 失败: {}".format(pf.path, e))
+
     elapsed_ms = int((time.time() - start_time) * 1000)
+    if task_id:
+        update_progress(task_id, 0.15, "agent_reviews", "running")
     return {
-        "current_stage": "agent_reviews",
-        "progress": 0.12,
-        "style_results": results,
-        "errors": errors,
-        "agent_durations": {"style": elapsed_ms},
+        "skill_results": all_findings,
+        "agent_durations": {"skill_scan": elapsed_ms},
     }
 
 
-async def security_review_node(state: ReviewState) -> dict[str, Any]:
-    """安全审计节点。"""
-    start_time = time.time()
-    parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context(state)
-    agent = SecurityAuditorAgent(context)
-    try:
-        results = await agent.review(parsed_files)
-        errors = []
-    except Exception as e:
-        results = []
-        errors = ["安全审计失败: {}".format(e)]
-    elapsed_ms = int((time.time() - start_time) * 1000)
-    return {
-        "current_stage": "agent_reviews",
-        "progress": 0.12,
-        "security_results": results,
-        "errors": errors,
-        "agent_durations": {"security": elapsed_ms},
-    }
+def _make_agent_review_node(
+    agent_type: str,
+    agent_cls: type,
+    progress: float,
+    results_key: str,
+):
+    """工厂：生成 LangGraph Agent 审查节点。
+
+    消除原 5 个几乎相同的 style/security/architecture/performance/refactor 节点模板。
+    每个节点逻辑完全一致，仅 agent 类型、进度值、结果 key 不同。
+
+    Args:
+        agent_type: Agent 类型标识（用于 tracing/span 属性）
+        agent_cls: Agent 类（如 StyleCheckerAgent）
+        progress: 该节点完成时的进度值
+        results_key: 结果存入 state 的 key（如 "style_results"）
+    """
+    async def _node(state: ReviewState) -> dict[str, Any]:
+        start_time = time.time()
+        task_id = state.get("task_id", "")
+        parsed_files = state.get("_parsed_files", [])
+        context = _get_agent_context(state, agent_type=agent_type)
+        agent = agent_cls(context)
+        results, errors = await _run_agent_with_tracing(agent, agent_type, parsed_files)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        if task_id:
+            update_progress(task_id, progress, "agent_reviews", "running")
+        return {
+            "current_stage": "agent_reviews",
+            "progress": progress,
+            results_key: results,
+            "errors": errors,
+            "agent_durations": {agent_type: elapsed_ms},
+        }
+
+    _node.__name__ = f"{agent_type}_review_node"
+    return _node
 
 
-async def architecture_review_node(state: ReviewState) -> dict[str, Any]:
-    """架构分析节点。"""
-    start_time = time.time()
-    parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context(state)
-    agent = ArchitectureAnalyzerAgent(context)
-    try:
-        results = await agent.review(parsed_files)
-        errors = []
-    except Exception as e:
-        results = []
-        errors = ["架构分析失败: {}".format(e)]
-    elapsed_ms = int((time.time() - start_time) * 1000)
-    return {
-        "current_stage": "agent_reviews",
-        "progress": 0.12,
-        "architecture_results": results,
-        "errors": errors,
-        "agent_durations": {"architecture": elapsed_ms},
-    }
-
-
-async def performance_review_node(state: ReviewState) -> dict[str, Any]:
-    """性能分析节点。"""
-    start_time = time.time()
-    parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context(state)
-    agent = PerformanceProfilerAgent(context)
-    try:
-        results = await agent.review(parsed_files)
-        errors = []
-    except Exception as e:
-        results = []
-        errors = ["性能分析失败: {}".format(e)]
-    elapsed_ms = int((time.time() - start_time) * 1000)
-    return {
-        "current_stage": "agent_reviews",
-        "progress": 0.12,
-        "performance_results": results,
-        "errors": errors,
-        "agent_durations": {"performance": elapsed_ms},
-    }
-
-
-async def refactor_review_node(state: ReviewState) -> dict[str, Any]:
-    """重构建议节点。"""
-    start_time = time.time()
-    parsed_files = state.get("_parsed_files", [])
-    context = _get_agent_context(state)
-    agent = RefactorAdvisorAgent(context)
-    try:
-        results = await agent.review(parsed_files)
-        errors = []
-    except Exception as e:
-        results = []
-        errors = ["重构分析失败: {}".format(e)]
-    elapsed_ms = int((time.time() - start_time) * 1000)
-    return {
-        "current_stage": "agent_reviews",
-        "progress": 0.12,
-        "refactor_results": results,
-        "errors": errors,
-        "agent_durations": {"refactor": elapsed_ms},
-    }
+# 通过工厂生成 5 个节点（保持原函数名，图构建代码无需改动）
+style_review_node = _make_agent_review_node(
+    "style", StyleCheckerAgent, 0.25, "style_results"
+)
+security_review_node = _make_agent_review_node(
+    "security", SecurityAuditorAgent, 0.35, "security_results"
+)
+architecture_review_node = _make_agent_review_node(
+    "architecture", ArchitectureAnalyzerAgent, 0.45, "architecture_results"
+)
+performance_review_node = _make_agent_review_node(
+    "performance", PerformanceProfilerAgent, 0.55, "performance_results"
+)
+refactor_review_node = _make_agent_review_node(
+    "refactor", RefactorAdvisorAgent, 0.65, "refactor_results"
+)
 
 
 async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
     """仲裁汇总节点。"""
     start_time = time.time()
-    context = _get_agent_context(state)
+    task_id = state.get("task_id", "")
+    if task_id:
+        update_progress(task_id, 0.7, "arbitrate", "running")
+    context = _get_agent_context(state, agent_type="arbitrator")
     arbitrator = ArbitratorAgent(context)
     style_results = state.get("style_results", [])
     security_results = state.get("security_results", [])
@@ -248,6 +388,8 @@ async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
             "stats": {},
         }
     elapsed_ms = int((time.time() - start_time) * 1000)
+    if task_id:
+        update_progress(task_id, 0.8, "generate_report", "running")
     return {
         "current_stage": "generate_report",
         "progress": 0.8,
@@ -262,7 +404,10 @@ async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
 async def generate_report_node(state: ReviewState) -> dict[str, Any]:
     """报告生成节点 - 含记忆保存。"""
     start_time = time.time()
-    context = _get_agent_context(state)
+    task_id = state.get("task_id", "")
+    if task_id:
+        update_progress(task_id, 0.9, "generate_report", "running")
+    context = _get_agent_context(state, agent_type="arbitrator")
     arbitrator = ArbitratorAgent(context)
 
     all_results = []
@@ -271,6 +416,8 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
     all_results.extend(state.get("architecture_results", []))
     all_results.extend(state.get("performance_results", []))
     all_results.extend(state.get("refactor_results", []))
+    # 合并 Skill 扫描发现（source='skill'），与 Agent 发现一起进入报告
+    all_results.extend(state.get("skill_results", []))
 
     merged = state.get("_merged_results", [])
     if not merged:
@@ -315,7 +462,6 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
     completed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # 保存记忆
-    task_id = state.get("task_id", "")
     if task_id:
         try:
             memory = _get_memory()
@@ -336,6 +482,9 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
             print("[Orchestrator] 记忆保存失败: {}".format(e))
 
     elapsed_ms = int((time.time() - start_time) * 1000)
+    # 标记任务完成，通知 SSE 推送 complete 事件
+    if task_id:
+        complete_progress(task_id)
     return {
         "current_stage": "done",
         "progress": 1.0,
@@ -352,10 +501,11 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
 # ============================================================
 
 def build_review_graph() -> StateGraph:
-    """构建审查工作流图 - 并行 Agent 编排 + 记忆系统集成。"""
+    """构建审查工作流图 - Skill 扫描 + 并行 Agent 编排 + 记忆系统集成。"""
     graph = StateGraph(ReviewState)
 
     graph.add_node("parse_code", parse_code_node)
+    graph.add_node("skill_scan", skill_scan_node)
     graph.add_node("style_review", style_review_node)
     graph.add_node("security_review", security_review_node)
     graph.add_node("architecture_review", architecture_review_node)
@@ -366,11 +516,13 @@ def build_review_graph() -> StateGraph:
 
     graph.set_entry_point("parse_code")
 
-    graph.add_edge("parse_code", "style_review")
-    graph.add_edge("parse_code", "security_review")
-    graph.add_edge("parse_code", "architecture_review")
-    graph.add_edge("parse_code", "performance_review")
-    graph.add_edge("parse_code", "refactor_review")
+    # parse_code 完成后先进入 skill_scan（可选执行），再并行启动 5 个 Agent
+    graph.add_edge("parse_code", "skill_scan")
+    graph.add_edge("skill_scan", "style_review")
+    graph.add_edge("skill_scan", "security_review")
+    graph.add_edge("skill_scan", "architecture_review")
+    graph.add_edge("skill_scan", "performance_review")
+    graph.add_edge("skill_scan", "refactor_review")
 
     graph.add_edge("style_review", "arbitrate")
     graph.add_edge("security_review", "arbitrate")

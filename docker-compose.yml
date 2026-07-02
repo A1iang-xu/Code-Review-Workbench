@@ -1,5 +1,17 @@
 version: "3.8"
 
+# ============================================================
+# 网络隔离：
+#   - frontend-net: 仅 frontend 与 backend
+#   - backend-net: backend、worker 与所有数据服务
+#   数据服务（postgres、redis 等）不直接暴露给 frontend
+# ============================================================
+networks:
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
+
 services:
   # ============================================
   # 后端 API 服务
@@ -16,7 +28,57 @@ services:
       - APP_DEBUG=false
       - POSTGRES_HOST=postgres
       - REDIS_URL=redis://redis:6379/0
-      - MILVUS_HOST=milvus
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 生产环境不再挂载源码卷（破坏镜像不可变性）
+    # 仅挂载 memory_data（持久化记忆）与 skills（热加载）
+    volumes:
+      - ./skills:/app/skills:ro           # Skill 热加载目录（只读，安全）
+      - memory_data:/app/memory_data
+    networks:
+      - frontend-net
+      - backend-net
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    # 资源限制：防止单容器 OOM 拖垮整机
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # Celery Worker (异步任务)
+  # 解决 BackgroundTasks 在进程重启时丢失任务的问题
+  # 启动: docker-compose up -d worker
+  # 查看日志: docker-compose logs -f worker
+  # ============================================
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: crw-worker
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - POSTGRES_HOST=postgres
+      - REDIS_URL=redis://redis:6379/0
       - OLLAMA_BASE_URL=http://ollama:11434
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     env_file:
@@ -27,42 +89,26 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./backend/app:/app/app
-      - ./skills:/app/skills           # Skill 热加载目录
+      - ./skills:/app/skills:ro
       - memory_data:/app/memory_data
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    networks:
+      - backend-net
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4 -Q review
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-
-  # ============================================
-  # Celery Worker (异步任务)
-  # ============================================
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: crw-worker
-    environment:
-      - POSTGRES_HOST=postgres
-      - REDIS_URL=redis://redis:6379/0
-      - MILVUS_HOST=milvus
-      - OLLAMA_BASE_URL=http://ollama:11434
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - postgres
-    volumes:
-      - ./backend/app:/app/app
-      - ./skills:/app/skills
-      - memory_data:/app/memory_data
-    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4
-    restart: unless-stopped
+      start_period: 15s
 
   # ============================================
   # 前端 (Nginx serving SPA + API proxy)
@@ -77,7 +123,17 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - frontend-net
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/"]
       interval: 30s
@@ -91,19 +147,29 @@ services:
     image: pgvector/pgvector:pg16
     container_name: crw-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-code_review}
-      POSTGRES_USER: ${POSTGRES_USER:-crw}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crw_secret}
-    ports:
-      - "5432:5432"
+      # 口令强制从 .env 读取，不再提供默认弱口令
+      POSTGRES_DB: ${POSTGRES_DB:?必须在 .env 中配置 POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?必须在 .env 中配置 POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?必须在 .env 中配置 POSTGRES_PASSWORD}
+    # 生产环境不暴露数据库端口到宿主机，仅在内网可见
+    # 如需本地调试，注释下方 ports 段或改为 127.0.0.1:5432:5432
+    expose:
+      - "5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crw}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
 
   # ============================================
   # Redis
@@ -111,74 +177,53 @@ services:
   redis:
     image: redis:7-alpine
     container_name: crw-redis
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redisdata:/data
+    networks:
+      - backend-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
     restart: unless-stopped
-
-  # ============================================
-  # Milvus 向量数据库 (语义记忆)
-  # ============================================
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    container_name: crw-etcd
-    environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-    volumes:
-      - etcddata:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    restart: unless-stopped
-
-  minio:
-    image: minio/minio:latest
-    container_name: crw-minio
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - miniodata:/minio_data
-    command: minio server /minio_data --console-address ":9001"
-    restart: unless-stopped
-
-  milvus:
-    image: milvusdb/milvus:v2.4.0
-    container_name: crw-milvus
-    depends_on:
-      - etcd
-      - minio
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-    volumes:
-      - milvusdata:/var/lib/milvus
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    command: milvus run standalone
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   # ============================================
   # Ollama (本地模型)
   # 注意：容器启动后需要手动拉取模型：
   #   docker exec crw-ollama ollama pull qwen2.5:7b
   #   docker exec crw-ollama ollama pull deepseek-coder:6.7b
+  # GPU 支持需在宿主机安装 NVIDIA Container Toolkit，
+  # 并取消下方 deploy.resources.reservations.devices 注释
   # ============================================
   ollama:
     image: ollama/ollama:latest
     container_name: crw-ollama
-    ports:
-      - "11434:11434"
+    expose:
+      - "11434"
     volumes:
       - ollamadata:/root/.ollama
+    networks:
+      - backend-net
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+        # GPU 支持（需 NVIDIA Container Toolkit）：
+        # reservations:
+        #   devices:
+        #     - driver: nvidia
+        #       count: 1
+        #       capabilities: [gpu]
 
   # ============================================
   # Jaeger — 全链路追踪 (OpenTelemetry)
@@ -192,7 +237,13 @@ services:
       - "16686:16686"  # Jaeger UI
       - "4317:4317"    # OTLP gRPC
       - "4318:4318"    # OTLP HTTP
+    networks:
+      - backend-net
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # ============================================
   # Prometheus — 指标采集
@@ -201,10 +252,12 @@ services:
     image: prom/prometheus:latest
     container_name: crw-prometheus
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheusdata:/prometheus
     ports:
       - "9090:9090"
+    networks:
+      - backend-net
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -212,13 +265,14 @@ services:
       - "--web.console.templates=/etc/prometheus/consoles"
       - "--web.enable-lifecycle"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
 volumes:
   pgdata:
   redisdata:
-  etcddata:
-  miniodata:
-  milvusdata:
   ollamadata:
   memory_data:
   prometheusdata:

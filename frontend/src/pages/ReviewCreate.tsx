@@ -1,8 +1,9 @@
 import { type FC, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import Editor from '@monaco-editor/react';
-import { reviewApi } from '../services/api';
-import { Plus, Trash2, Play, Upload, FileText } from 'lucide-react';
+import { reviewApi, skillApi } from '../services/api';
+import { Plus, Trash2, Play, Upload, FileText, Puzzle } from 'lucide-react';
 import type { ReviewRequest } from '../types';
 
 interface FileItem {
@@ -30,6 +31,18 @@ export const ReviewCreate: FC = () => {
   const [branch, setBranch] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+
+  const { data: skills } = useQuery({
+    queryKey: ['skills'],
+    queryFn: skillApi.list,
+  });
+
+  const toggleSkill = (name: string) => {
+    setSelectedSkills((prev) =>
+      prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]
+    );
+  };
 
   const addFile = () => {
     const name = `file_${files.length + 1}.py`;
@@ -86,6 +99,7 @@ export const ReviewCreate: FC = () => {
       files: validFiles,
       repo_url: repoUrl,
       branch,
+      enabled_skills: selectedSkills,
     };
     try {
       const res = await reviewApi.create(payload);
@@ -140,6 +154,36 @@ export const ReviewCreate: FC = () => {
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {/* Skill 选择 */}
+      {skills && skills.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Puzzle size={16} className="text-blue-500" />
+            <h4 className="text-sm font-semibold text-slate-700">Skill 扫描（可选）</h4>
+            <span className="text-xs text-slate-400">
+              启用的 Skill 将在 Agent 审查前对每个文件执行静态扫描，发现的问题会合并进报告
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {skills.map((s) => (
+              <button
+                key={s.name}
+                type="button"
+                onClick={() => toggleSkill(s.name)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                  selectedSkills.includes(s.name)
+                    ? 'border-blue-400 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200'
+                }`}
+                title={s.description}
+              >
+                {s.display_name}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
