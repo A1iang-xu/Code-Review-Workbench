@@ -149,6 +149,11 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: ./backend
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_DB: code_review
+          POSTGRES_USER: crw
+          POSTGRES_PASSWORD: crw_ci_secret
         run: |
           pytest tests/ -v \
             --cov=app \
