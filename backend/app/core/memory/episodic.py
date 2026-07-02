@@ -252,7 +252,7 @@ class EpisodicMemory:
             匹配的 episode 列表（按相关性排序）
         """
         try:
-            from sqlalchemy import select, or_, text
+            from sqlalchemy import select, or_
             from app.models import async_session_factory
             from app.models.memory import EpisodicMemoryRecord
 

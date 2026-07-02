@@ -6,10 +6,8 @@ Skill 加载器
 """
 
 import importlib
-import os
 import sys
 from pathlib import Path
-from typing import Any
 
 from app.core.skills.registry import BaseSkill, SkillRegistry
 

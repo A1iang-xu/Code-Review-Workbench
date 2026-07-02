@@ -11,7 +11,7 @@ Security Auditor Agent
 import json
 import re
 
-from app.core.agents.base import AgentContext, BaseReviewAgent
+from app.core.agents.base import BaseReviewAgent
 from app.integrations.ast_engine import ParsedFile
 
 

@@ -72,8 +72,8 @@ async def test_run_review_pipeline_success():
     with patch.object(tasks, "review_graph", MagicMock()) as mock_graph, \
          patch.object(tasks, "_save_to_db", AsyncMock()) as mock_save, \
          patch.object(tasks, "fail_progress") as mock_fail, \
-         patch.object(tasks, "update_progress") as mock_update, \
-         patch.object(tasks, "complete_progress") as mock_complete:
+         patch.object(tasks, "update_progress") as _mock_update, \
+         patch.object(tasks, "complete_progress") as _mock_complete:
         # review_graph.ainvoke 是 async，用 AsyncMock
         mock_graph.ainvoke = AsyncMock(return_value=final_state)
 
@@ -117,8 +117,8 @@ async def test_run_review_pipeline_graph_failure():
     with patch.object(tasks, "review_graph", MagicMock()) as mock_graph, \
          patch.object(tasks, "_save_to_db", AsyncMock()) as mock_save, \
          patch.object(tasks, "fail_progress") as mock_fail, \
-         patch.object(tasks, "update_progress") as mock_update, \
-         patch.object(tasks, "complete_progress") as mock_complete:
+         patch.object(tasks, "update_progress") as _mock_update2, \
+         patch.object(tasks, "complete_progress") as _mock_complete2:
         # ainvoke 抛异常
         mock_graph.ainvoke = AsyncMock(side_effect=RuntimeError("graph boom"))
 

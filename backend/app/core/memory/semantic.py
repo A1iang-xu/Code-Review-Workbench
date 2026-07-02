@@ -220,9 +220,8 @@ class SemanticMemory:
             匹配的知识列表（按相似度排序）
         """
         try:
-            from sqlalchemy import select, text
+            from sqlalchemy import text
             from app.models import async_session_factory
-            from app.models.memory import SemanticMemoryRecord
 
             # 生成查询向量（使用 embedding 模型）
             query_embedding = await self._generate_embedding(query)

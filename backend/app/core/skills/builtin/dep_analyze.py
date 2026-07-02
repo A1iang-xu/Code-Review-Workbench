@@ -152,7 +152,8 @@ class DepAnalyzeSkill(BaseSkill):
                         "suggestion": f"固定到具体版本，如 \"{name}\": \"1.2.3\"",
                     })
                 # 检查使用 ^ 但无锁定文件
-                elif ver.startswith("^") and "package-lock.json" not in str(context or {}):
+                elif ver.startswith("^"):
+                    # context 参数由 executor 传入，包含文件上下文信息
                     findings.append({
                         "skill": "dep_analyze",
                         "severity": "low",
@@ -171,7 +172,6 @@ class DepAnalyzeSkill(BaseSkill):
         findings: list[dict] = []
         lines = content.splitlines()
 
-        has_go_sum = "go.sum" in str(context or {})
         indirect_count = 0
 
         for i, line in enumerate(lines, 1):

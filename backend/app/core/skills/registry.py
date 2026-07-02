@@ -8,11 +8,10 @@ Skill 系统核心模块
 - SkillRegistry: 单例注册中心
 """
 
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 
 # ============================================================

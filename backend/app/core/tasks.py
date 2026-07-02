@@ -9,13 +9,12 @@ Celery 异步任务
 
 import asyncio
 import datetime
-import json
 from typing import Any
 
 from app.core.celery_app import celery_app
 from app.core.orchestrator import review_graph
 from app.core.state import ReviewState
-from app.api.v1.ws import update_progress, complete_progress, fail_progress
+from app.api.v1.ws import fail_progress
 
 
 @celery_app.task(

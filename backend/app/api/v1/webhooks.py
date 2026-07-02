@@ -7,8 +7,6 @@ POST /api/v1/webhooks/gitlab — GitLab MR Webhook (审查触发)
 Webhook 使用 BackgroundTasks 异步执行审查，避免超时。
 """
 
-import asyncio
-import re
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
@@ -207,7 +205,6 @@ async def _run_pr_review(
         # 等待 Celery 任务完成（轮询结果）
         # 注意：这里使用同步等待，因为 Webhook 需要最终状态
         # 实际生产中可改为异步回调
-        from app.core.celery_app import celery_app
         result = run_review_task.AsyncResult(task_id)
 
         try:
@@ -452,7 +449,7 @@ async def gitlab_webhook(
 
         # GitLab merge request info
         mr_title = object_attributes.get("title", "")
-        source_project_id = object_attributes.get("source_project_id", project_id)
+        _ = object_attributes.get("source_project_id", project_id)
     except (KeyError, TypeError) as e:
         raise HTTPException(status_code=400, detail=f"Missing MR fields: {e}")
 

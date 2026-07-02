@@ -16,7 +16,6 @@ GitHub 仓库文件拉取
 
 import base64
 import re
-from typing import Any
 
 import httpx
 
@@ -293,7 +292,7 @@ async def fetch_files_from_url(url: str) -> tuple[list[dict[str, str]], str]:
         # 仓库或目录 URL
         files = await fetch_repo_files(owner, repo, branch, path)
         if not files:
-            return [], f"未在仓库中找到支持的代码文件（.py/.go/.ts/.js/.java）"
+            return [], "未在仓库中找到支持的代码文件（.py/.go/.ts/.js/.java）"
 
         # 限制文件数量
         if len(files) > settings.MAX_FILES_PER_REVIEW:

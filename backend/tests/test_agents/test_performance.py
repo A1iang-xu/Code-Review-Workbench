@@ -8,7 +8,7 @@ import pytest
 
 from app.core.agents.base import AgentContext
 from app.core.agents.performance import PerformanceProfilerAgent
-from app.integrations.ast_engine import ASTEngine, ParsedFile
+from app.integrations.ast_engine import ASTEngine
 
 
 @pytest.fixture

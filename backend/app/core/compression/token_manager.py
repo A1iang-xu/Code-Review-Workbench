@@ -5,9 +5,8 @@ Token 管理 — 配额分配与消息压缩
 管理本地模型和云端模型的 token 预算分配与压缩策略。
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 
 class ModelTier(str, Enum):

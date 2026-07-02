@@ -10,9 +10,9 @@
 import uuid
 import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, Index
+from sqlalchemy import DateTime, Float, Integer, String, Text, Index
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models import Base
 

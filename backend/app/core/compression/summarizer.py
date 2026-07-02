@@ -5,7 +5,6 @@ Hierarchical Summarizer
 使用 LLM utility 模型减少 token 消耗。
 """
 
-from typing import Any
 
 
 class HierarchicalSummarizer:
@@ -68,7 +67,7 @@ class HierarchicalSummarizer:
     @staticmethod
     def _fallback_summary(code: str) -> str:
         """降级摘要：返回前几个非空行。"""
-        lines = [l.strip() for l in code.split("\n") if l.strip()]
+        lines = [line.strip() for line in code.split("\n") if line.strip()]
         if not lines:
             return "(空代码)"
         first = lines[0]

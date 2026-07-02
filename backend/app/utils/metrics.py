@@ -45,11 +45,24 @@ except ImportError:
     class _NoOpRegistry:
         pass
 
-    Counter = lambda name, doc, labelnames=None, **kwargs: _NoOpMetric()
-    Histogram = lambda name, doc, labelnames=None, buckets=None, **kwargs: _NoOpMetric()
-    Gauge = lambda name, doc, labelnames=None, **kwargs: _NoOpMetric()
+    def _Counter(name, doc, labelnames=None, **kwargs):
+        return _NoOpMetric()
+
+    def _Histogram(name, doc, labelnames=None, buckets=None, **kwargs):
+        return _NoOpMetric()
+
+    def _Gauge(name, doc, labelnames=None, **kwargs):
+        return _NoOpMetric()
+
     REGISTRY = _NoOpRegistry()
-    generate_latest = lambda registry: b"# Prometheus client not installed\n"
+
+    def _generate_latest(registry):
+        return b"# Prometheus client not installed\n"
+
+    Counter = _Counter
+    Histogram = _Histogram
+    Gauge = _Gauge
+    generate_latest = _generate_latest
     CONTENT_TYPE_LATEST = "text/plain"
 
 

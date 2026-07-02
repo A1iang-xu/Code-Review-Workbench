@@ -5,7 +5,6 @@
 提供类型安全的全局 Settings 单例。
 """
 
-from pathlib import Path
 from functools import lru_cache
 
 from pydantic import model_validator

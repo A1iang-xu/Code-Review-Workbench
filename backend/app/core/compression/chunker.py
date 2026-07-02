@@ -5,7 +5,6 @@ Semantic Chunker
 按函数/类边界分块，保留代码语义完整性，避免在函数中间截断。
 """
 
-from typing import Any
 
 
 class ChunkInfo:

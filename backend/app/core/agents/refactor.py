@@ -9,7 +9,7 @@ Refactor Advisor Agent
 import json
 import re
 
-from app.core.agents.base import AgentContext, BaseReviewAgent
+from app.core.agents.base import BaseReviewAgent
 from app.integrations.ast_engine import ParsedFile
 
 
@@ -235,10 +235,10 @@ class RefactorAdvisorAgent(BaseReviewAgent):
                             f"过多参数使函数难以理解、调用和测试。"
                         ),
                         "suggestion": (
-                            f"重构建议：\n"
-                            f"1) 将相关参数封装为数据类/struct；\n"
-                            f"2) 使用构建器模式（Builder Pattern）分步设置；\n"
-                            f"3) 检查是否可以拆分为多个职责更单一的函数。"
+                            "重构建议：\n"
+                            "1) 将相关参数封装为数据类/struct；\n"
+                            "2) 使用构建器模式（Builder Pattern）分步设置；\n"
+                            "3) 检查是否可以拆分为多个职责更单一的函数。"
                         ),
                         "code_snippet": node.text.decode("utf-8")[:500],
                     })

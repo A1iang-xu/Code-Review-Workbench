@@ -5,7 +5,6 @@ StyleCheckSkill
 支持 Python（PEP 8）、TypeScript/JavaScript、Go、Java。
 """
 
-import re
 from typing import Any
 
 from app.core.skills.registry import BaseSkill, SkillCategory, SkillMetadata, SkillResult

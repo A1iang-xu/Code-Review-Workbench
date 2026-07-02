@@ -12,7 +12,7 @@ import json
 import re
 from typing import Any
 
-from app.core.agents.base import AgentContext, BaseReviewAgent
+from app.core.agents.base import BaseReviewAgent
 from app.integrations.ast_engine import ParsedFile
 
 
@@ -619,7 +619,6 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
 
         # 步骤 1: 依赖图分析
         try:
-            import networkx as nx
             graph, module_names = self._build_dependency_graph(parsed_files)
             graph_issues = self._analyze_graph(graph, module_names, parsed_files)
             all_issues.extend(graph_issues)

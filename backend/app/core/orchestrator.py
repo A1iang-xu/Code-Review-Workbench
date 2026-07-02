@@ -13,7 +13,6 @@ Agent 调用前通过 TokenQuotaManager 检查 token 配额。
 
 import datetime
 import time
-import uuid
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -31,7 +30,7 @@ from app.integrations.ast_engine import ASTEngine
 from app.core.compression.chunker import SemanticChunker
 from app.core.compression.token_manager import TokenQuotaManager
 from app.core.skills.executor import SkillExecutor
-from app.api.v1.ws import update_progress, complete_progress, fail_progress
+from app.api.v1.ws import update_progress, complete_progress
 
 
 # ============================================================

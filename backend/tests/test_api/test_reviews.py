@@ -19,7 +19,7 @@ class TestCreateReview:
             "language": "python",
         }
         # mock Celery 任务提交，避免依赖 Redis / Celery worker
-        with patch("app.api.v1.reviews.run_review_task") as mock_celery, \
+        with patch("app.api.v1.reviews.run_review_task") as _mock_celery, \
              patch("app.api.v1.reviews.async_session_factory") as mock_session:
             # async_session_factory() 返回 async context manager
             mock_session.return_value.__aenter__ = AsyncMock(return_value=None)

@@ -10,7 +10,7 @@ import json
 import re
 from typing import Any
 
-from app.core.agents.base import AgentContext, BaseReviewAgent
+from app.core.agents.base import BaseReviewAgent
 from app.integrations.ast_engine import ParsedFile
 
 
@@ -401,7 +401,7 @@ class ArbitratorAgent(BaseReviewAgent):
             '<div class="container">',
             # Header
             '<div class="header">',
-            f'<h1>代码审查报告</h1>',
+            '<h1>代码审查报告</h1>',
             f'<div class="meta">生成时间: {now}</div>',
             f'<div class="meta">任务 ID: {self._escape_html(task_id)}</div>',
             '<div class="score-section">',

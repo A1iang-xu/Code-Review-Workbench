@@ -24,7 +24,7 @@ from app.models import async_session_factory
 from app.models.review import ReviewTask, ReviewStatus
 from app.models.agent_result import AgentResult
 from app.models.report import ReviewReport
-from app.api.v1.ws import update_progress, complete_progress, fail_progress
+from app.api.v1.ws import update_progress
 
 settings = get_settings()
 
@@ -601,38 +601,38 @@ async def export_review(task_id: str, format: str = "markdown"):
 def _build_markdown_report(data: dict) -> str:
     """构建 Markdown 格式的审查报告。"""
     lines: list[str] = []
-    lines.append(f"# 代码审查报告")
-    lines.append(f"")
+    lines.append("# 代码审查报告")
+    lines.append("")
     lines.append(f"**任务 ID:** {data.get('task_id', '')}")
     lines.append(f"**状态:** {data.get('status', '')}")
     lines.append(f"**评分:** {data.get('score', 0)}/10")
     lines.append(f"**问题数:** {data.get('issues_count', 0)}")
-    lines.append(f"")
-    lines.append(f"## 摘要")
-    lines.append(f"")
+    lines.append("")
+    lines.append("## 摘要")
+    lines.append("")
     lines.append(data.get("summary", "无摘要"))
-    lines.append(f"")
+    lines.append("")
 
     # Agent 统计
     stats = data.get("stats", {})
     if stats:
-        lines.append(f"## Agent 发现统计")
-        lines.append(f"")
-        lines.append(f"| Agent | 发现数 |")
-        lines.append(f"|-------|--------|")
+        lines.append("## Agent 发现统计")
+        lines.append("")
+        lines.append("| Agent | 发现数 |")
+        lines.append("|-------|--------|")
         for agent, count in stats.items():
             lines.append(f"| {agent} | {count} |")
-        lines.append(f"")
+        lines.append("")
 
     # 问题列表
     issues = data.get("issues", [])
     if issues:
-        lines.append(f"## 问题详情")
-        lines.append(f"")
+        lines.append("## 问题详情")
+        lines.append("")
         for i, issue in enumerate(issues, 1):
             sev = issue.get("severity", "info").upper()
             lines.append(f"### {i}. [{sev}] {issue.get('title', '无标题')}")
-            lines.append(f"")
+            lines.append("")
             lines.append(f"- **文件:** `{issue.get('file_path', '')}:{issue.get('line_start', 0)}`")
             lines.append(f"- **分类:** {issue.get('category', '')}")
             lines.append(f"- **Agent:** {issue.get('agent_type', '')}")
@@ -640,10 +640,10 @@ def _build_markdown_report(data: dict) -> str:
                 lines.append(f"- **描述:** {issue['description']}")
             if issue.get("suggestion"):
                 lines.append(f"- **建议:** {issue['suggestion']}")
-            lines.append(f"")
+            lines.append("")
 
-    lines.append(f"---")
-    lines.append(f"*由 Code Review Workbench 自动生成*")
+    lines.append("---")
+    lines.append("*由 Code Review Workbench 自动生成*")
     return "\n".join(lines)
 
 

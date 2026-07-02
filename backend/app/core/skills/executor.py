@@ -8,7 +8,7 @@ import asyncio
 import time
 from typing import Any
 
-from app.core.skills.registry import BaseSkill, SkillCategory, SkillRegistry, SkillResult
+from app.core.skills.registry import SkillCategory, SkillRegistry, SkillResult
 
 
 class SkillExecutor:

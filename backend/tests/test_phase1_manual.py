@@ -193,7 +193,7 @@ async def test_llm():
         reasoning = data.get("reasoning", {})
         utility = data.get("utility", {})
 
-        print(f"  ✅ POST /api/test/llm")
+        print("  ✅ POST /api/test/llm")
         print(f"     reasoning ({reasoning.get('model')}): {reasoning.get('status')}")
         if reasoning.get("status") == "error":
             print(f"       error: {reasoning.get('error')[:100]}")
