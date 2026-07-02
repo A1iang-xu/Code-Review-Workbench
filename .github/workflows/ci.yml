@@ -154,6 +154,8 @@ jobs:
           POSTGRES_DB: code_review
           POSTGRES_USER: crw
           POSTGRES_PASSWORD: crw_ci_secret
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           pytest tests/ -v \
             --cov=app \

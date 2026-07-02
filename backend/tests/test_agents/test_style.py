@@ -9,6 +9,13 @@ import pytest
 from app.core.agents.base import AgentContext
 from app.core.agents.style import StyleCheckerAgent
 from app.integrations.ast_engine import ASTEngine
+from app.config import get_settings
+
+_settings = get_settings()
+pytestmark = pytest.mark.skipif(
+    _settings.ZHIPU_API_KEY in ("your-zhipu-api-key-here", ""),
+    reason="ZHIPU_API_KEY 未配置，跳过 LLM 依赖测试"
+)
 
 
 @pytest.fixture
