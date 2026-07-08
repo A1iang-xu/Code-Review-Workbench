@@ -98,7 +98,7 @@ async def test_run_review_pipeline_success():
         mock_save.assert_awaited_once()
         save_kwargs = mock_save.await_args.kwargs
         assert len(save_kwargs["merged_results"]) == 2
-        assert len(save_kwargs["agent_timeline"]) == 8  # 8 个节点：parser + skill_scan + 5 agents + arbitrator
+        assert len(save_kwargs["agent_timeline"]) == 9  # 9 个节点：parser + skill_scan + 5 agents + signal_exchange + arbitrator
         assert save_kwargs["errors"] == []
 
         # 成功路径不应调用 fail_progress

@@ -11,6 +11,7 @@ import asyncio
 import datetime
 from typing import Any
 
+from app.config import get_settings
 from app.core.celery_app import celery_app
 from app.core.orchestrator import review_graph
 from app.core.state import ReviewState
@@ -68,6 +69,7 @@ async def _run_review_pipeline(
     完成后将结果持久化到数据库，进度通过 Redis 推送给 SSE 客户端。
     """
     # 构建初始状态
+    settings = get_settings()
     initial_state: ReviewState = {
         "task_id": task_id,
         "repo_url": request_data.get("repo_url", ""),
@@ -75,6 +77,12 @@ async def _run_review_pipeline(
         "language": request_data.get("language", "auto"),
         "files": request_data.get("files", []),
         "enabled_skills": request_data.get("enabled_skills", []),
+        # 协作字段初始化
+        "collaboration_enabled": settings.COLLABORATION_ENABLED,
+        "agent_signals": [],
+        "collaboration_results": [],
+        "collaboration_round": 0,
+        "active_collab_agents": [],
         "skill_results": [],
         "current_stage": "parse_code",
         "progress": 0.0,
@@ -118,6 +126,7 @@ async def _run_review_pipeline(
         ("performance_results", "performance"),
         ("refactor_results", "refactor"),
         ("skill_results", "skill"),
+        ("collaboration_results", "collaboration"),
     ]
 
     for key, agent_name in result_keys:
@@ -151,9 +160,40 @@ async def _run_review_pipeline(
          "duration_ms": durations.get("performance", 0), "finding_count": agent_stats.get("performance", 0)},
         {"agent_type": "refactor", "display_name": "重构建议", "status": "completed",
          "duration_ms": durations.get("refactor", 0), "finding_count": agent_stats.get("refactor", 0)},
-        {"agent_type": "arbitrator", "display_name": "仲裁汇总", "status": "completed",
-         "duration_ms": durations.get("arbitrator", 0), "finding_count": issues_count},
     ]
+
+    # 信号交换节点
+    agent_timeline.append({
+        "agent_type": "signal_exchange",
+        "display_name": "信号交换",
+        "status": "completed",
+        "duration_ms": durations.get("signal_exchange", 0),
+        "finding_count": 0,
+    })
+    # 第二轮协作节点（仅展示实际执行的）
+    collab_durations = {k: v for k, v in durations.items() if k.startswith("collab_")}
+    for collab_key, dur in collab_durations.items():
+        agent_name = collab_key.replace("collab_", "")
+        collab_count = sum(
+            1 for r in all_results
+            if r.get("source") == "collaboration" and r.get("triggered_by") == agent_name
+        )
+        agent_timeline.append({
+            "agent_type": collab_key,
+            "display_name": f"协作复查({agent_name})",
+            "status": "completed",
+            "duration_ms": dur,
+            "finding_count": collab_count,
+        })
+
+    # arbitrator 条目
+    agent_timeline.append({
+        "agent_type": "arbitrator",
+        "display_name": "仲裁汇总",
+        "status": "completed",
+        "duration_ms": durations.get("arbitrator", 0),
+        "finding_count": issues_count,
+    })
 
     # 持久化到数据库
     await _save_to_db(
