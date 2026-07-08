@@ -422,7 +422,6 @@ def _make_collab_review_node(agent_type: str, agent_cls: type):
     """工厂：生成第二轮协作复查节点。"""
     async def _node(state: ReviewState) -> dict[str, Any]:
         start_time = time.time()
-        task_id = state.get("task_id", "")
 
         # 检查是否需要执行
         active_agents = state.get("active_collab_agents", [])
