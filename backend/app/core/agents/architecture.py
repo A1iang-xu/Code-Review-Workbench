@@ -162,6 +162,14 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
                 graph.nodes[module_name]["file_path"] = pf.path
 
         # 第二轮：提取 import 关系
+        # 构建 简单模块名 → 完整模块名 映射，支持模糊匹配
+        # 例如: 文件路径 "user.py" → 模块名 "user"
+        #       import "from src.models.user import ..." → 匹配到 "user"
+        simple_to_full: dict[str, str] = {}
+        for mod in module_names.values():
+            simple = mod.rsplit(".", 1)[-1] if "." in mod else mod
+            simple_to_full.setdefault(simple, mod)
+
         for pf in parsed_files:
             if pf.language not in SUPPORTED_LANGUAGES:
                 continue
@@ -173,12 +181,20 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
                 # 将 import 路径转换为模块名并在图中找到或创建
                 imported_module = self._resolve_import(imported, pf.language)
 
-                if imported_module and imported_module != module_name:
-                    if not graph.has_node(imported_module):
-                        graph.add_node(imported_module)
-                    # 添加有向边: 当前模块 → 被导入的模块
-                    if not graph.has_edge(module_name, imported_module):
-                        graph.add_edge(module_name, imported_module)
+                if not imported_module or imported_module == module_name:
+                    continue
+
+                # 模糊匹配：如果完整模块名不在图中，尝试用最后一段匹配
+                if not graph.has_node(imported_module):
+                    simple = imported_module.rsplit(".", 1)[-1] if "." in imported_module else imported_module
+                    if simple in simple_to_full:
+                        imported_module = simple_to_full[simple]
+
+                if not graph.has_node(imported_module):
+                    graph.add_node(imported_module)
+                # 添加有向边: 当前模块 → 被导入的模块
+                if not graph.has_edge(module_name, imported_module):
+                    graph.add_edge(module_name, imported_module)
 
         return graph, module_names
 

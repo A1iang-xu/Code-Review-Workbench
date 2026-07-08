@@ -55,9 +55,11 @@ export const AgentTimeline: FC<Props> = ({ timeline }) => {
                 <span className="text-sm font-medium text-slate-700">
                   {agent.display_name}
                 </span>
-                {agent.status === 'completed' && (
+                {agent.status === 'completed' && agent.duration_ms > 0 && (
                   <span className="text-xs text-slate-400">
-                    {agent.duration_ms > 0 ? `${(agent.duration_ms / 1000).toFixed(1)}s` : ''}
+                    {agent.duration_ms < 1000
+                      ? `${agent.duration_ms}ms`
+                      : `${(agent.duration_ms / 1000).toFixed(1)}s`}
                   </span>
                 )}
               </div>

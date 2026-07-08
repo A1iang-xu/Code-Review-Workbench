@@ -351,7 +351,9 @@ class ArbitratorAgent(BaseReviewAgent):
             score_color = "#dc2626"  # 红色
 
         total = len(merged_results)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        # 生成时间用北京时间（UTC+8）显示，更符合用户预期
+        tz_bj = datetime.timezone(datetime.timedelta(hours=8))
+        now = datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S (北京时间)")
 
         html_parts = [
             '<!DOCTYPE html>',
