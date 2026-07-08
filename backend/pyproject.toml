@@ -2,6 +2,12 @@
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+# flat-layout 下 setuptools 会发现多个顶级目录（app/alembic/memory_data/tests），
+# 需显式限定只打包 app，避免构建失败
+include = ["app*"]
+exclude = ["alembic*", "memory_data*", "tests*"]
+
 [project]
 name = "code-review-workbench"
 version = "0.1.0"
