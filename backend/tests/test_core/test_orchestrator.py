@@ -186,3 +186,17 @@ class TestMakeAgentReviewNode:
         assert node.__name__ == "style_review_node", (
             f"节点 __name__ 应为 style_review_node, 实际: {node.__name__}"
         )
+
+
+class TestReviewStateCollaborationFields:
+    """验证 ReviewState 包含协作相关字段。"""
+
+    def test_review_state_has_collaboration_fields(self):
+        """ReviewState TypedDict 包含协作字段定义。"""
+        from app.core.state import ReviewState
+        hints = ReviewState.__annotations__
+        assert "agent_signals" in hints
+        assert "collaboration_results" in hints
+        assert "collaboration_enabled" in hints
+        assert "collaboration_round" in hints
+        assert "active_collab_agents" in hints

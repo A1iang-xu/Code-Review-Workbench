@@ -64,6 +64,16 @@ class ReviewState(TypedDict):
     # ---- 错误 ----
     errors: Annotated[list[str], operator.add]
 
+    # ---- Agent 协作信号与第二轮结果 ----
+    # agent_signals: 第一轮各 Agent 输出的跨 Agent 关注信号（operator.add 汇聚）
+    agent_signals: Annotated[list[dict], operator.add]
+    # collaboration_results: 第二轮 collab 节点的增量发现
+    collaboration_results: Annotated[list[dict], operator.add]
+    # 协作控制
+    collaboration_enabled: bool  # 是否启用协作（配置项，默认 True）
+    collaboration_round: int     # 当前协作轮次
+    active_collab_agents: list[str]  # 第二轮需触发的 Agent 列表
+
     # ---- Agent 执行耗时（毫秒）----
     # 并行节点通过 _merge_dicts 合并各自的耗时记录
     agent_durations: Annotated[dict[str, int], _merge_dicts]
