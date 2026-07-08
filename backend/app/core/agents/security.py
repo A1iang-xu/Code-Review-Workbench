@@ -362,6 +362,91 @@ class SecurityAuditorAgent(BaseReviewAgent):
             print(f"[SecurityAuditor] LLM 分析失败，已跳过: {e}")
             return []
 
+    # ---- 协作复查 ----
+
+    async def collaborative_review(
+        self,
+        parsed_files: list[ParsedFile],
+        signals: list[dict],
+    ) -> list[dict]:
+        """安全 Agent 协作复查。
+
+        当收到架构 Agent 的循环依赖信号时，对相关模块的数据流做深度安全分析。
+        第二轮使用 LOCAL tier 模型（use_reasoning=False），不挤占 CLOUD 预算。
+        """
+        if not signals:
+            return []
+
+        from app.config import get_settings
+        max_files = get_settings().COLLABORATION_MAX_FILES_PER_REVIEW
+
+        # 收集信号涉及的文件
+        target_paths: set[str] = set()
+        for sig in signals:
+            for p in sig.get("file_paths", []):
+                if p:
+                    target_paths.add(p)
+
+        relevant_files = [
+            pf for pf in parsed_files
+            if pf.path in target_paths and pf.language in SUPPORTED_LANGUAGES
+        ][:max_files]
+
+        if not relevant_files:
+            return []
+
+        collab_ctx = self._build_collab_context(signals)
+        all_collab_findings: list[dict] = []
+
+        for pf in relevant_files:
+            content = pf.content
+            if len(content) > 8000:
+                content = content[:8000] + "\n# ... (truncated)"
+
+            prompt = (
+                f"{SECURITY_PROMPT}\n\n"
+                f"Another agent has flagged this file as potentially risky. "
+                f"Pay special attention to data flow, input validation, and "
+                f"authorization boundaries in this module.\n\n"
+                f"File path: {pf.path}{collab_ctx}"
+            )
+
+            try:
+                response = await self._llm_analyze(
+                    prompt=prompt,
+                    code_context=content,
+                    use_reasoning=False,  # 第二轮用本地模型，节省 CLOUD 预算
+                )
+                findings = self._parse_llm_response(response, pf)
+                all_collab_findings.extend(findings)
+            except Exception as e:
+                print(f"[SecurityAuditor][Collab] 协作复查失败: {e}")
+
+        return all_collab_findings
+
+    def _parse_llm_response(self, response: str, parsed_file: ParsedFile) -> list[dict]:
+        """解析 LLM 安全分析响应（复用 _llm_scan 的 JSON 解析逻辑）。"""
+        json_match = re.search(r"\[.*\]", response, re.DOTALL)
+        if not json_match:
+            return []
+        try:
+            findings = json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            raw = re.sub(r",\s*]", "]", json_match.group(0))
+            try:
+                findings = json.loads(raw)
+            except json.JSONDecodeError:
+                return []
+        for f in findings:
+            f["agent_type"] = self.agent_type
+            f["file_path"] = parsed_file.path
+            f["line_start"] = f.get("line_start", 0)
+            f["line_end"] = f.get("line_end", 0)
+            f["code_snippet"] = f.get("code_snippet", "")
+            if f.get("severity") not in ("critical", "high", "medium", "low", "info"):
+                f["severity"] = "medium"
+        return findings
+
     # ---- 主 entry point ----
 
     async def review(self, parsed_files: list[ParsedFile]) -> list[dict]:
