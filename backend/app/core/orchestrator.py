@@ -500,13 +500,15 @@ async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
             performance_results=performance_results,
             refactor_results=refactor_results,
             task_id=state.get("task_id", ""),
+            collaboration_results=state.get("collaboration_results", []),
         )
     except Exception as e:
         errors.append("仲裁汇总失败: {}".format(e))
+        collab_results = state.get("collaboration_results", [])
         arbitrated = {
             "merged_results": (
                 style_results + security_results + architecture_results +
-                performance_results + refactor_results
+                performance_results + refactor_results + collab_results
             ),
             "severity_counts": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             "score": 0.0,
