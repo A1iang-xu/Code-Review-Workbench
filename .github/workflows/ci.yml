@@ -173,7 +173,7 @@ jobs:
             --timeout=120
 
       - name: Upload coverage to Codecov (optional)
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           file: ./backend/coverage.xml
           flags: backend

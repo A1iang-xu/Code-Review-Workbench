@@ -5,19 +5,26 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # System dependencies
+# libffi-dev/libxml2-dev/libxslt-dev: semgrep & lxml 原生扩展编译所需
+# pkg-config: 帮助构建脚本定位系统库
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     build-essential \
     git \
     libpq-dev \
+    libffi-dev \
+    libxml2-dev \
+    libxslt-dev \
+    pkg-config \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies — 先复制 pyproject.toml 并创建最小包结构以利用层缓存
 # pip install -e 需要源代码存在，Docker 中改用非可编辑安装
+# 首次失败时用 -v 重试以在 CI 日志中输出详细错误
 COPY pyproject.toml .
 RUN mkdir -p app && touch app/__init__.py && \
-    pip install --no-cache-dir . && \
+    (pip install --no-cache-dir . || pip install --no-cache-dir -v .) && \
     rm -rf app
 
 # Copy app code
