@@ -139,6 +139,19 @@ export const reviewApi = {
     });
     return res.data;
   },
+
+  /** 获取系统配置摘要（供设置页展示） */
+  getConfig: () =>
+    api.get<{
+      llm_reasoning_model: string;
+      llm_utility_model: string;
+      zhipu_api_key_masked: string;
+      deepseek_api_key_masked: string;
+      ollama_base_url: string;
+      postgres_host: string;
+      postgres_port: number;
+      postgres_db: string;
+    }>('/config').then(r => r.data),
 };
 
 // ---- 工具函数：触发浏览器下载（从 service 层剥离 DOM 操作） ----

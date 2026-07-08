@@ -439,6 +439,30 @@ async def list_reviews(
         raise
 
 
+@router.get("/config")
+async def get_config():
+    """返回当前 LLM 配置摘要（脱敏），供前端设置页展示。"""
+    return {
+        "llm_reasoning_model": settings.LLM_REASONING_MODEL,
+        "llm_utility_model": settings.LLM_UTILITY_MODEL,
+        "zhipu_api_key_masked": _mask_key(settings.ZHIPU_API_KEY),
+        "deepseek_api_key_masked": _mask_key(settings.DEEPSEEK_API_KEY),
+        "ollama_base_url": settings.OLLAMA_BASE_URL,
+        "postgres_host": settings.POSTGRES_HOST,
+        "postgres_port": settings.POSTGRES_PORT,
+        "postgres_db": settings.POSTGRES_DB,
+    }
+
+
+def _mask_key(key: str) -> str:
+    """脱敏 API key，仅保留前 4 位和后 2 位。"""
+    if not key or key.startswith("your-"):
+        return "未配置"
+    if len(key) <= 8:
+        return "••••"
+    return f"{key[:4]}...{key[-2:]}"
+
+
 @router.get("/reviews/stats/summary")
 async def get_review_stats():
     """获取审查统计摘要。"""

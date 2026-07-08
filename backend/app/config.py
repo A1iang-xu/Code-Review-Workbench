@@ -112,8 +112,8 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODELS: str = "qwen2.5:7b,deepseek-coder:6.7b"
 
-    LLM_REASONING_MODEL: str = "glm-5.2"
-    LLM_UTILITY_MODEL: str = "ollama/qwen2.5:7b"
+    LLM_REASONING_MODEL: str = "deepseek-v4-flash"
+    LLM_UTILITY_MODEL: str = "deepseek-v4-flash"
     # Embedding 模型（智谱 embedding-3，默认 2048 维），用于语义记忆向量检索
     LLM_EMBEDDING_MODEL: str = "glm/embedding-3"
 
