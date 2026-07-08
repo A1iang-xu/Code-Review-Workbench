@@ -68,3 +68,81 @@ class TestSignalRoutingRules:
             assert value[0]  # target 非空
             assert value[1] in ("focus_area", "suspected_issue", "context_hint")
             assert isinstance(value[2], str) and len(value[2]) > 0
+
+
+class TestBaseReviewAgentEmitSignals:
+    """BaseReviewAgent.emit_signals 默认实现测试。"""
+
+    def test_emit_signals_filters_non_critical(self):
+        """仅 critical/high 问题生成信号。"""
+        from app.core.agents.style import StyleCheckerAgent
+        from app.core.agents.base import AgentContext
+
+        agent = StyleCheckerAgent(AgentContext())
+        findings = [
+            {"agent_type": "style", "severity": "low", "category": "naming",
+             "file_path": "a.py", "line_start": 1, "line_end": 1, "title": "x"},
+            {"agent_type": "style", "severity": "high", "category": "naming",
+             "file_path": "a.py", "line_start": 1, "line_end": 1, "title": "x"},
+        ]
+        # style+naming 不在路由表中，所以即使 high 也不生成信号
+        import asyncio
+        signals = asyncio.run(agent.emit_signals(findings, []))
+        assert signals == []
+
+    def test_emit_signals_matches_routing_rule(self):
+        """匹配路由规则的 high 问题生成信号。"""
+        from app.core.agents.security import SecurityAuditorAgent
+        from app.core.agents.base import AgentContext
+
+        agent = SecurityAuditorAgent(AgentContext())
+        findings = [
+            {"agent_type": "security", "severity": "critical",
+             "category": "sql_injection", "file_path": "db.py",
+             "line_start": 10, "line_end": 10, "title": "SQL注入",
+             "description": "拼接SQL"},
+        ]
+        import asyncio
+        signals = asyncio.run(agent.emit_signals(findings, []))
+        assert len(signals) == 1
+        assert signals[0]["source_agent"] == "security"
+        assert signals[0]["target_agent"] == "refactor"
+        assert signals[0]["signal_type"] == "suspected_issue"
+        assert signals[0]["file_paths"] == ["db.py"]
+
+    def test_emit_signals_respects_max_limit(self):
+        """信号数不超过配置上限（默认 10）。"""
+        from app.core.agents.security import SecurityAuditorAgent
+        from app.core.agents.base import AgentContext
+        from app.config import get_settings
+
+        agent = SecurityAuditorAgent(AgentContext())
+        findings = [
+            {"agent_type": "security", "severity": "critical",
+             "category": "sql_injection", "file_path": f"f{i}.py",
+             "line_start": 1, "line_end": 1, "title": "x", "description": "d"}
+            for i in range(20)
+        ]
+        import asyncio
+        signals = asyncio.run(agent.emit_signals(findings, []))
+        max_signals = get_settings().COLLABORATION_MAX_SIGNALS_PER_AGENT
+        assert len(signals) <= max_signals
+
+
+class TestBuildCollabContext:
+    """_build_collab_context 格式测试。"""
+
+    def test_empty_signals_returns_empty(self):
+        from app.core.agents.base import BaseReviewAgent
+        assert BaseReviewAgent._build_collab_context([]) == ""
+
+    def test_non_empty_signals_contains_message(self):
+        from app.core.agents.base import BaseReviewAgent
+        signals = [
+            {"source_agent": "architecture", "message": "循环依赖",
+             "severity_hint": "high"},
+        ]
+        ctx = BaseReviewAgent._build_collab_context(signals)
+        assert "Collaboration Context" in ctx
+        assert "循环依赖" in ctx
+        assert "architecture" in ctx

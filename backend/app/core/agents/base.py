@@ -216,3 +216,91 @@ class BaseReviewAgent(ABC):
             f"compressed to {len(compressed)} chars via {len(chunks)} chunks."
         )
         return compressed
+
+    # ============================================================
+    # Agent 协作接口
+    # ============================================================
+
+    async def emit_signals(
+        self, findings: list[dict], parsed_files: list[ParsedFile]
+    ) -> list[dict]:
+        """从第一轮审查结果中提取协作信号。
+
+        默认实现：根据 SIGNAL_ROUTING_RULES 匹配 findings 的 (agent_type, category)，
+        仅对 critical/high 问题生成信号。子类可覆盖以实现自定义信号逻辑。
+
+        Args:
+            findings: 第一轮 review() 的结果
+            parsed_files: 已解析文件列表（供子类增强上下文用）
+
+        Returns:
+            信号字典列表（符合 AgentSignal.to_dict() 格式）
+        """
+        from app.core.agents.collaboration import SIGNAL_ROUTING_RULES
+        from app.config import get_settings
+
+        max_signals = get_settings().COLLABORATION_MAX_SIGNALS_PER_AGENT
+        signals: list[dict] = []
+
+        for finding in findings:
+            if len(signals) >= max_signals:
+                break
+            # 仅对 critical/high 问题生成信号，避免信号爆炸
+            if finding.get("severity") not in ("critical", "high"):
+                continue
+            category = finding.get("category", "")
+            key = (self.agent_type, category)
+            rule = SIGNAL_ROUTING_RULES.get(key)
+            if rule is None:
+                continue
+            target_agent, signal_type, message = rule
+            file_path = finding.get("file_path", "")
+            signals.append({
+                "source_agent": self.agent_type,
+                "target_agent": target_agent,
+                "signal_type": signal_type,
+                "file_paths": [file_path] if file_path else [],
+                "location": {
+                    "line_start": finding.get("line_start", 0),
+                    "line_end": finding.get("line_end", 0),
+                },
+                "message": message,
+                "severity_hint": finding.get("severity", "medium"),
+                "context": {"original_finding_title": finding.get("title", "")},
+            })
+        return signals
+
+    async def collaborative_review(
+        self,
+        parsed_files: list[ParsedFile],
+        signals: list[dict],
+    ) -> list[dict]:
+        """第二轮协作复查。
+
+        默认实现：返回空。子类（如 SecurityAuditorAgent）可覆盖以实现
+        基于信号的定向复查逻辑。
+
+        Args:
+            parsed_files: 已解析文件列表
+            signals: 发给自己的信号列表
+
+        Returns:
+            增量 findings 列表（调用方会标记 source="collaboration"）
+        """
+        return []
+
+    @staticmethod
+    def _build_collab_context(signals: list[dict]) -> str:
+        """构建协作上下文文本，注入 LLM prompt。"""
+        if not signals:
+            return ""
+        parts = ["\n\n--- Collaboration Context ---"]
+        parts.append("Other agents have flagged the following concerns for your attention:")
+        for i, sig in enumerate(signals, 1):
+            parts.append(
+                f"{i}. [{sig.get('source_agent')}] {sig.get('message')} "
+                f"(severity_hint: {sig.get('severity_hint')})"
+            )
+        parts.append("Please pay extra attention to these areas during your review.")
+        parts.append("--- End Collaboration Context ---\n")
+        return "\n".join(parts)
