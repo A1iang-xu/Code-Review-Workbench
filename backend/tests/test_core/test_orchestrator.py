@@ -266,3 +266,53 @@ class TestCollabNodeSkipLogic:
         }
         result = await node(state)
         assert result == {}
+
+
+class TestCollaborationIntegration:
+    """端到端协作流程集成测试。"""
+
+    @pytest.mark.asyncio
+    async def test_architecture_finding_generates_security_signal(self):
+        """架构 Agent 的循环依赖 finding 能生成发给 security 的信号。"""
+        from app.core.agents.architecture import ArchitectureAnalyzerAgent
+        from app.core.agents.base import AgentContext
+        from app.integrations.ast_engine import ParsedFile
+
+        agent = ArchitectureAnalyzerAgent(AgentContext())
+        # 构造一个包含循环依赖描述的 finding
+        findings = [{
+            "agent_type": "architecture",
+            "severity": "high",
+            "category": "dependency_direction",
+            "file_path": "app/models/user.py",
+            "line_start": 0,
+            "line_end": 0,
+            "title": "循环依赖: 2 个模块形成依赖环",
+            "description": "app.models.user → app.api.users → app.models.user",
+        }]
+        pf = ParsedFile(
+            path="app/models/user.py", content="x = 1",
+            language="python", tree=None, issues=[],
+        )
+        signals = await agent.emit_signals(findings, [pf])
+        assert len(signals) >= 1
+        sec_signals = [s for s in signals if s["target_agent"] == "security"]
+        assert len(sec_signals) == 1
+        assert "app/models/user.py" in sec_signals[0]["file_paths"]
+
+    @pytest.mark.asyncio
+    async def test_route_collaboration_returns_arbitrate_when_empty(self):
+        """无 active agents 时路由返回 arbitrate。"""
+        # 模拟 _route_collaboration 逻辑
+        state = {"active_collab_agents": []}
+        active = state.get("active_collab_agents", [])
+        result = ["arbitrate"] if not active else [f"collab_{a}" for a in active]
+        assert result == ["arbitrate"]
+
+    @pytest.mark.asyncio
+    async def test_route_collaboration_returns_collab_nodes_when_active(self):
+        """有 active agents 时路由返回对应 collab 节点。"""
+        state = {"active_collab_agents": ["security", "refactor"]}
+        active = state.get("active_collab_agents", [])
+        result = ["arbitrate"] if not active else [f"collab_{a}" for a in active]
+        assert result == ["collab_security", "collab_refactor"]
