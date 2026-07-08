@@ -630,9 +630,10 @@ async def generate_report_node(state: ReviewState) -> dict[str, Any]:
 # ============================================================
 
 def build_review_graph() -> StateGraph:
-    """构建审查工作流图 - Skill 扫描 + 并行 Agent 编排 + 记忆系统集成。"""
+    """构建审查工作流图 - 第一轮并行 + 信号交换 + 第二轮协作 + 仲裁。"""
     graph = StateGraph(ReviewState)
 
+    # 第一轮节点
     graph.add_node("parse_code", parse_code_node)
     graph.add_node("skill_scan", skill_scan_node)
     graph.add_node("style_review", style_review_node)
@@ -640,12 +641,22 @@ def build_review_graph() -> StateGraph:
     graph.add_node("architecture_review", architecture_review_node)
     graph.add_node("performance_review", performance_review_node)
     graph.add_node("refactor_review", refactor_review_node)
+
+    # 协作节点
+    graph.add_node("signal_exchange", signal_exchange_node)
+    graph.add_node("collab_style", collab_style_node)
+    graph.add_node("collab_security", collab_security_node)
+    graph.add_node("collab_architecture", collab_architecture_node)
+    graph.add_node("collab_performance", collab_performance_node)
+    graph.add_node("collab_refactor", collab_refactor_node)
+
+    # 仲裁与报告
     graph.add_node("arbitrate", arbitrate_node)
     graph.add_node("generate_report", generate_report_node)
 
     graph.set_entry_point("parse_code")
 
-    # parse_code 完成后先进入 skill_scan（可选执行），再并行启动 5 个 Agent
+    # 第一轮并行
     graph.add_edge("parse_code", "skill_scan")
     graph.add_edge("skill_scan", "style_review")
     graph.add_edge("skill_scan", "security_review")
@@ -653,11 +664,40 @@ def build_review_graph() -> StateGraph:
     graph.add_edge("skill_scan", "performance_review")
     graph.add_edge("skill_scan", "refactor_review")
 
-    graph.add_edge("style_review", "arbitrate")
-    graph.add_edge("security_review", "arbitrate")
-    graph.add_edge("architecture_review", "arbitrate")
-    graph.add_edge("performance_review", "arbitrate")
-    graph.add_edge("refactor_review", "arbitrate")
+    # 第一轮 → signal_exchange（汇聚）
+    graph.add_edge("style_review", "signal_exchange")
+    graph.add_edge("security_review", "signal_exchange")
+    graph.add_edge("architecture_review", "signal_exchange")
+    graph.add_edge("performance_review", "signal_exchange")
+    graph.add_edge("refactor_review", "signal_exchange")
+
+    # signal_exchange → 条件 fan-out
+    def _route_collaboration(state: ReviewState) -> list[str]:
+        """根据 active_collab_agents 返回需要执行的 collab 节点列表。"""
+        active = state.get("active_collab_agents", [])
+        if not active:
+            return ["arbitrate"]
+        return [f"collab_{a}" for a in active]
+
+    graph.add_conditional_edges(
+        "signal_exchange",
+        _route_collaboration,
+        {
+            "collab_style": "collab_style",
+            "collab_security": "collab_security",
+            "collab_architecture": "collab_architecture",
+            "collab_performance": "collab_performance",
+            "collab_refactor": "collab_refactor",
+            "arbitrate": "arbitrate",
+        },
+    )
+
+    # 所有 collab 节点 → arbitrate
+    graph.add_edge("collab_style", "arbitrate")
+    graph.add_edge("collab_security", "arbitrate")
+    graph.add_edge("collab_architecture", "arbitrate")
+    graph.add_edge("collab_performance", "arbitrate")
+    graph.add_edge("collab_refactor", "arbitrate")
 
     graph.add_edge("arbitrate", "generate_report")
     graph.add_edge("generate_report", END)

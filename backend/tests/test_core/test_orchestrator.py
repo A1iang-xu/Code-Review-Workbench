@@ -24,14 +24,21 @@ from app.core.orchestrator import (
 )
 
 
-# 8 个核心节点的名称（与 build_review_graph() 中 add_node 一致）
+# 包含协作节点的完整节点列表（与 build_review_graph() 中 add_node 一致）
 EXPECTED_NODES = {
     "parse_code",
+    "skill_scan",
     "style_review",
     "security_review",
     "architecture_review",
     "performance_review",
     "refactor_review",
+    "signal_exchange",
+    "collab_style",
+    "collab_security",
+    "collab_architecture",
+    "collab_performance",
+    "collab_refactor",
     "arbitrate",
     "generate_report",
 }
@@ -73,13 +80,13 @@ class TestBuildReviewGraph:
     """验证 build_review_graph() 构造的图结构。"""
 
     def test_build_review_graph(self):
-        """图非空且包含 8 个核心节点。"""
+        """图非空且包含所有节点（含协作节点）。"""
         graph = build_review_graph()
 
         # 图对象本身非空
         assert graph is not None
 
-        # 兼容不同 langgraph 版本：优先从 .nodes 取，回退到 .get_graph().nodes
+        # 兼容不同 langgraph 版本：优先从 .nodes 取
         node_names: set[str] = set()
         if hasattr(graph, "nodes") and getattr(graph, "nodes", None):
             node_names = set(graph.nodes.keys())
@@ -89,11 +96,9 @@ class TestBuildReviewGraph:
             except Exception:
                 node_names = set()
 
-        # __start__ / __end__ 是 langgraph 自动添加的伪节点，不参与 EXPECTED_NODES 校验
+        # __start__ / __end__ 是 langgraph 自动添加的伪节点
         missing = EXPECTED_NODES - node_names
-        assert not missing, (
-            f"图中缺少节点: {missing}, 实际节点: {node_names}"
-        )
+        assert not missing, f"缺少节点: {missing}, 实际节点: {node_names}"
 
 
 class TestParseCodeNode:
