@@ -26,7 +26,9 @@ const getStageDisplayName = (stage: string): string => {
   const stageMap: Record<string, string> = {
     pending: '等待中',
     parse_code: '代码解析',
+    skill_scan: 'Skill 扫描',
     agent_reviews: 'Agent 并行审查',
+    collaboration: 'Agent 协作复查',
     arbitrate: '仲裁汇总',
     generate_report: '生成报告',
     done: '完成',
@@ -38,12 +40,14 @@ const getStageDisplayName = (stage: string): string => {
 const getCurrentAgent = (progress: number): string => {
   const pct = progress * 100;
   if (pct < 10) return '代码解析';
+  if (pct < 20) return 'Skill 扫描';
   if (pct < 25) return '风格检查 (style)';
   if (pct < 35) return '安全审计 (security)';
   if (pct < 45) return '架构分析 (architecture)';
   if (pct < 55) return '性能分析 (performance)';
   if (pct < 65) return '重构建议 (refactor)';
-  if (pct < 90) return '仲裁汇总';
+  if (pct < 70) return '信号交换 + 协作复查';
+  if (pct < 80) return '仲裁汇总';
   return '生成报告';
 };
 

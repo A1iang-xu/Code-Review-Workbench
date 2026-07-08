@@ -1,45 +1,33 @@
-import { type FC, useState } from 'react';
+import { type FC, useMemo } from 'react';
 import Editor, { DiffEditor } from '@monaco-editor/react';
-
-const languages = [
-  { id: 'python', label: 'Python' },
-  { id: 'go', label: 'Go' },
-  { id: 'typescript', label: 'TypeScript' },
-  { id: 'javascript', label: 'JavaScript' },
-  { id: 'java', label: 'Java' },
-];
 
 interface Props {
   original: string;
   modified: string;
 }
 
+/** 根据内容头部注释中的 File: 路径推断主要语言 */
+const detectLanguageFromContent = (content: string): string => {
+  // 从注释头中提取第一个文件路径
+  const match = content.match(/# File:\s*(.+)/);
+  if (match) {
+    const ext = match[1].split('.').pop()?.toLowerCase().trim();
+    const map: Record<string, string> = {
+      py: 'python', go: 'go', ts: 'typescript', tsx: 'typescript',
+      js: 'javascript', jsx: 'javascript', java: 'java',
+    };
+    if (ext && map[ext]) return map[ext];
+  }
+  return 'python';
+};
+
 export const DiffViewer: FC<Props> = ({ original, modified }) => {
-  const [language, setLanguage] = useState('python');
-  const hasModified = modified && modified.trim().length > 0;
+  const language = useMemo(() => detectLanguageFromContent(original), [original]);
+  const hasModified = modified && modified.trim().length > 0 && modified !== original;
 
   return (
     <div className="space-y-2">
-      {/* Language selector */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500">语言:</span>
-        {languages.map((lang) => (
-          <button
-            key={lang.id}
-            onClick={() => setLanguage(lang.id)}
-            className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
-              language === lang.id
-                ? 'bg-blue-500 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {lang.label}
-          </button>
-        ))}
-      </div>
-
       {hasModified ? (
-        /* Monaco Diff Editor — 有修改内容时显示对比 */
         <div className="border border-slate-200 rounded-lg overflow-hidden" style={{ height: 500 }}>
           <DiffEditor
             height="100%"
@@ -60,7 +48,6 @@ export const DiffViewer: FC<Props> = ({ original, modified }) => {
           />
         </div>
       ) : (
-        /* Monaco 普通编辑器 — 无修改内容时仅展示原始代码 */
         <div className="border border-slate-200 rounded-lg overflow-hidden" style={{ height: 500 }}>
           {original ? (
             <Editor

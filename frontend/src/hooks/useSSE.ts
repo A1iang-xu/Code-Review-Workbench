@@ -6,6 +6,7 @@ export function useReviewProgress(taskId: string | undefined) {
   const [isComplete, setIsComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const failureCountRef = useRef(0);
+  const completedRef = useRef(false);
   const MAX_FAILURES = 3;
 
   useEffect(() => {
@@ -17,6 +18,7 @@ export function useReviewProgress(taskId: string | undefined) {
       setIsComplete(false);
       setError(null);
       failureCountRef.current = 0;
+      completedRef.current = false;
     }, 0);
 
     const es = new EventSource(`/api/v1/reviews/${taskId}/stream`);
@@ -56,11 +58,15 @@ export function useReviewProgress(taskId: string | undefined) {
       } catch (err) {
         console.warn('[useSSE] complete 事件解析失败:', e.data, err);
       }
+      completedRef.current = true;
       setIsComplete(true);
       es.close();
     });
 
     es.addEventListener('error', () => {
+      // 任务已完成后的连接关闭是正常行为，不报错
+      if (completedRef.current) return;
+
       const readyState = (es as EventSource).readyState;
       if (readyState === EventSource.CLOSED) {
         setError('审查进度连接已关闭');

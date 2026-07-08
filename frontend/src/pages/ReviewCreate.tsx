@@ -32,6 +32,7 @@ export const ReviewCreate: FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('auto');
 
   const { data: skills } = useQuery({
     queryKey: ['skills'],
@@ -99,6 +100,7 @@ export const ReviewCreate: FC = () => {
       files: validFiles,
       repo_url: repoUrl,
       branch,
+      language: selectedLanguage,
       enabled_skills: selectedSkills,
     };
     try {
@@ -156,6 +158,26 @@ export const ReviewCreate: FC = () => {
           {error}
         </div>
       )}
+
+      {/* Language selector */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="flex items-center gap-3">
+          <label className="text-xs font-medium text-slate-500 whitespace-nowrap">审查语言</label>
+          <select
+            value={selectedLanguage}
+            onChange={(e) => setSelectedLanguage(e.target.value)}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all bg-white"
+          >
+            <option value="auto">自动检测</option>
+            <option value="python">Python</option>
+            <option value="go">Go</option>
+            <option value="typescript">TypeScript</option>
+            <option value="javascript">JavaScript</option>
+            <option value="java">Java</option>
+          </select>
+          <span className="text-xs text-slate-400">默认自动检测，可手动指定以获得更精准的分析</span>
+        </div>
+      </div>
 
       {/* Skill 选择 */}
       {skills && skills.length > 0 && (
