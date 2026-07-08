@@ -1,5 +1,4 @@
 # Code Review Workbench — Backend Dockerfile
-# Multi-stage pattern for smaller production images
 # 使用 Python 3.11 而非 3.12：semgrep 的 PyPI wheel 仅支持 cp38-cp311，
 # 在 3.12 上 pip 会回退到 sdist 源码构建导致失败
 FROM python:3.11-slim
@@ -21,16 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Python dependencies — 先复制 pyproject.toml 并创建最小包结构以利用层缓存
-# pip install -e 需要源代码存在，Docker 中改用非可编辑安装
-# 首次失败时用 -v 重试以在 CI 日志中输出详细错误
-COPY pyproject.toml .
-RUN mkdir -p app && touch app/__init__.py && \
-    (pip install --no-cache-dir . || pip install --no-cache-dir -v .) && \
-    rm -rf app
-
-# Copy app code
+# Copy source code and install package with all dependencies
 COPY . .
+RUN pip install --no-cache-dir .
 
 # Create memory data directory
 RUN mkdir -p /app/memory_data

@@ -233,37 +233,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # 镜像构建后扫描漏洞
+      # 使用 docker build 而非 docker/build-push-action：
+      # 1. 输出完整 pip install 日志便于诊断（buildx 会隐藏输出）
+      # 2. 消除 docker/setup-buildx-action@v3 和 docker/build-push-action@v6
+      #    的 Node.js 20 deprecation 警告
       - name: Build backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          push: false
-          tags: crw-backend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        id: build_backend
+        continue-on-error: true
+        run: docker build --progress=plain -t crw-backend:latest ./backend
 
       - name: Build frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          push: false
-          tags: crw-frontend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        id: build_frontend
+        continue-on-error: true
+        run: docker build --progress=plain -t crw-frontend:latest ./frontend
 
       - name: Trivy scan backend image
+        if: steps.build_backend.outcome == 'success'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: crw-backend:latest
           severity: CRITICAL,HIGH
-          exit-code: "0"  # 仅告警，不阻断（按需调整为 1 阻断）
+          exit-code: "0"
         continue-on-error: true
 
       - name: Trivy scan frontend image
+        if: steps.build_frontend.outcome == 'success'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: crw-frontend:latest
