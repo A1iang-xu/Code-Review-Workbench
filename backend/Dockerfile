@@ -21,8 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy source code and install package with all dependencies
+# 必须先升级 pip：python:3.11-slim 自带 pip 24.0 的依赖解析器存在已知问题，
+# 升级到最新版可正确解析 semgrep 与 opentelemetry 等包的版本约束
 COPY . .
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir .
 
 # Create memory data directory
 RUN mkdir -p /app/memory_data
