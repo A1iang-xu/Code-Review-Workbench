@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     MAX_FILES_PER_REVIEW: int = 50
     REVIEW_TIMEOUT_SECONDS: int = 300
 
+    # ---- Agent 协作配置 ----
+    COLLABORATION_ENABLED: bool = True              # 是否启用 Agent 协作
+    COLLABORATION_MAX_SIGNALS_PER_AGENT: int = 10   # 单 Agent 信号数上限
+    COLLABORATION_MAX_FILES_PER_REVIEW: int = 5     # 单 collab 节点复查文件数上限
+    COLLABORATION_TIMEOUT_SECONDS: int = 60         # 协作阶段总超时
+
     # ---- GitHub / GitLab 集成 ----
     GITHUB_TOKEN: str = ""
     GITLAB_TOKEN: str = ""
