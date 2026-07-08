@@ -133,6 +133,7 @@ jobs:
       - name: Database migrations
         # 关键修复：删除 || echo，迁移失败必须 fail CI
         # alembic upgrade head 本身幂等，无需容错
+        # 失败时输出 ::error:: annotation 以便通过 API 诊断
         working-directory: ./backend
         env:
           POSTGRES_HOST: localhost
@@ -141,10 +142,17 @@ jobs:
           POSTGRES_PASSWORD: crw_ci_secret
         run: |
           python -c "
-          from alembic.config import Config
-          from alembic import command
-          config = Config('alembic.ini')
-          command.upgrade(config, 'head')
+          import sys, traceback
+          try:
+              from alembic.config import Config
+              from alembic import command
+              config = Config('alembic.ini')
+              command.upgrade(config, 'head')
+              print('Migrations completed successfully')
+          except Exception as e:
+              print(f'::error::Migration failed: {type(e).__name__}: {e}')
+              traceback.print_exc()
+              sys.exit(1)
           "
 
       - name: Run tests with coverage
