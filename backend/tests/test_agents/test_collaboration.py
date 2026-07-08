@@ -146,3 +146,95 @@ class TestBuildCollabContext:
         assert "Collaboration Context" in ctx
         assert "循环依赖" in ctx
         assert "architecture" in ctx
+
+
+class TestArchitectureEmitSignals:
+    """ArchitectureAnalyzerAgent.emit_signals 测试。"""
+
+    def test_circular_dependency_generates_security_signal(self):
+        """循环依赖 → 生成发给 security 的信号。"""
+        from app.core.agents.architecture import ArchitectureAnalyzerAgent
+        from app.core.agents.base import AgentContext
+
+        agent = ArchitectureAnalyzerAgent(AgentContext())
+        findings = [
+            {"agent_type": "architecture", "severity": "high",
+             "category": "dependency_direction",
+             "file_path": "app/models/user.py",
+             "line_start": 0, "line_end": 0,
+             "title": "循环依赖: 2 个模块形成依赖环",
+             "description": "以下 2 个模块形成循环依赖: app.models.user → app.api.users → app.models.user"},
+        ]
+        import asyncio
+        signals = asyncio.run(agent.emit_signals(findings, []))
+        assert len(signals) >= 1
+        sec_signals = [s for s in signals if s["target_agent"] == "security"]
+        assert len(sec_signals) >= 1
+        assert sec_signals[0]["signal_type"] == "focus_area"
+
+    def test_high_coupling_generates_performance_signal(self):
+        """高耦合 → 生成发给 performance 的信号。"""
+        from app.core.agents.architecture import ArchitectureAnalyzerAgent
+        from app.core.agents.base import AgentContext
+
+        agent = ArchitectureAnalyzerAgent(AgentContext())
+        findings = [
+            {"agent_type": "architecture", "severity": "critical",
+             "category": "coupling",
+             "file_path": "app/core/orchestrator.py",
+             "line_start": 0, "line_end": 0,
+             "title": "高耦合节点: 'app.core.orchestrator' 被 8 个模块依赖",
+             "description": "模块被 8 个模块直接依赖"},
+        ]
+        import asyncio
+        signals = asyncio.run(agent.emit_signals(findings, []))
+        perf_signals = [s for s in signals if s["target_agent"] == "performance"]
+        assert len(perf_signals) >= 1
+
+    def test_low_severity_does_not_generate_signal(self):
+        """low 严重等级不生成信号。"""
+        from app.core.agents.architecture import ArchitectureAnalyzerAgent
+        from app.core.agents.base import AgentContext
+
+        agent = ArchitectureAnalyzerAgent(AgentContext())
+        findings = [
+            {"agent_type": "architecture", "severity": "low",
+             "category": "dependency_direction", "file_path": "a.py",
+             "line_start": 0, "line_end": 0, "title": "x", "description": "d"},
+        ]
+        import asyncio
+        signals = asyncio.run(agent.emit_signals(findings, []))
+        assert signals == []
+
+
+class TestSecurityCollaborativeReview:
+    """SecurityAuditorAgent.collaborative_review 测试。"""
+
+    def test_empty_signals_returns_empty(self):
+        """无信号返回空。"""
+        from app.core.agents.security import SecurityAuditorAgent
+        from app.core.agents.base import AgentContext
+        import asyncio
+        agent = SecurityAuditorAgent(AgentContext())
+        result = asyncio.run(agent.collaborative_review([], []))
+        assert result == []
+
+    def test_returns_empty_when_no_relevant_files(self):
+        """信号涉及的文件不在 parsed_files 中，返回空。"""
+        from app.core.agents.security import SecurityAuditorAgent
+        from app.core.agents.base import AgentContext
+        from app.integrations.ast_engine import ParsedFile
+        import asyncio
+
+        agent = SecurityAuditorAgent(AgentContext())
+        signals = [{
+            "source_agent": "architecture",
+            "target_agent": "security",
+            "signal_type": "focus_area",
+            "file_paths": ["nonexistent.py"],
+            "message": "循环依赖",
+            "severity_hint": "high",
+        }]
+        pf = ParsedFile(path="other.py", content="x = 1", language="python")
+        result = asyncio.run(agent.collaborative_review([pf], signals))
+        assert result == []

@@ -97,6 +97,7 @@ class ArbitratorAgent(BaseReviewAgent):
         architecture_results: list[dict],
         performance_results: list[dict],
         refactor_results: list[dict],
+        collaboration_results: list[dict] | None = None,
     ) -> dict[str, Any]:
         """合并所有 Agent 结果，执行去重、排序、统计和评分。
 
@@ -106,6 +107,7 @@ class ArbitratorAgent(BaseReviewAgent):
             architecture_results: ArchitectureAnalyzer 的结果
             performance_results: PerformanceProfiler 的结果
             refactor_results: RefactorAdvisor 的结果
+            collaboration_results: 第二轮 Agent 协作的结果（可选）
 
         Returns:
             {
@@ -123,6 +125,9 @@ class ArbitratorAgent(BaseReviewAgent):
         all_results.extend(architecture_results)
         all_results.extend(performance_results)
         all_results.extend(refactor_results)
+        # 合并第二轮协作结果
+        if collaboration_results:
+            all_results.extend(collaboration_results)
 
         # --- 统计各 Agent 发现数 ---
         agent_stats: dict[str, int] = {}
@@ -528,6 +533,7 @@ class ArbitratorAgent(BaseReviewAgent):
         performance_results: list[dict],
         refactor_results: list[dict],
         task_id: str = "",
+        collaboration_results: list[dict] | None = None,
     ) -> dict[str, Any]:
         """完整仲裁流程：合并 → 去重 → 排序 → 评分 → 摘要 → HTML 报告。
 
@@ -538,6 +544,7 @@ class ArbitratorAgent(BaseReviewAgent):
             performance_results: PerformanceProfiler 结果
             refactor_results: RefactorAdvisor 结果
             task_id: 任务 ID
+            collaboration_results: 第二轮 Agent 协作的结果（可选）
 
         Returns:
             {
@@ -556,6 +563,7 @@ class ArbitratorAgent(BaseReviewAgent):
             architecture_results=architecture_results,
             performance_results=performance_results,
             refactor_results=refactor_results,
+            collaboration_results=collaboration_results or [],
         )
 
         merged_results = arbitrated["merged_results"]

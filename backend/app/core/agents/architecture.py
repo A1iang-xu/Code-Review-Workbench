@@ -600,6 +600,77 @@ class ArchitectureAnalyzerAgent(BaseReviewAgent):
             print(f"[ArchitectureAnalyzer] LLM 分析失败，已跳过: {e}")
             return []
 
+    # ---- Agent 协作：自定义信号生成 ----
+
+    async def emit_signals(
+        self, findings: list[dict], parsed_files: list[ParsedFile]
+    ) -> list[dict]:
+        """架构 Agent 自定义信号生成。
+
+        对循环依赖和高耦合问题生成更丰富的上下文信号：
+        - 循环依赖 → 通知 security 重点检查数据流
+        - 高耦合 → 通知 performance 检查性能瓶颈
+        """
+        from app.config import get_settings
+
+        max_signals = get_settings().COLLABORATION_MAX_SIGNALS_PER_AGENT
+        signals: list[dict] = []
+
+        for finding in findings:
+            if len(signals) >= max_signals:
+                break
+            category = finding.get("category", "")
+            severity = finding.get("severity", "")
+
+            # 循环依赖 → 通知 security 检查数据流
+            if category == "dependency_direction" and severity in ("critical", "high"):
+                desc = finding.get("description", "")
+                signals.append({
+                    "source_agent": "architecture",
+                    "target_agent": "security",
+                    "signal_type": "focus_area",
+                    "file_paths": self._extract_cycle_files(desc, parsed_files),
+                    "location": {"line_start": 0, "line_end": 0},
+                    "message": "检测到循环依赖，建议重点检查这些模块的数据流是否存在注入或越权风险",
+                    "severity_hint": "high",
+                    "context": {
+                        "cycle_description": desc[:200],
+                        "original_finding_title": finding.get("title", ""),
+                    },
+                })
+
+            # 高耦合 → 通知 performance 检查性能瓶颈
+            elif category == "coupling" and severity in ("critical", "high"):
+                file_path = finding.get("file_path", "")
+                signals.append({
+                    "source_agent": "architecture",
+                    "target_agent": "performance",
+                    "signal_type": "focus_area",
+                    "file_paths": [file_path] if file_path else [],
+                    "location": {"line_start": 0, "line_end": 0},
+                    "message": "模块被多模块依赖，建议检查其是否存在性能瓶颈或调用热点",
+                    "severity_hint": severity,
+                    "context": {
+                        "coupling_degree": finding.get("title", ""),
+                    },
+                })
+
+        return signals
+
+    def _extract_cycle_files(
+        self, cycle_desc: str, parsed_files: list[ParsedFile]
+    ) -> list[str]:
+        """从循环依赖描述中提取涉及的文件路径。
+
+        匹配 parsed_files 中路径或模块名出现在描述里的文件。
+        """
+        matched: list[str] = []
+        for pf in parsed_files:
+            module_name = self._path_to_module(pf.path, pf.language)
+            if pf.path in cycle_desc or module_name in cycle_desc:
+                matched.append(pf.path)
+        return matched[:5]  # 限制最多 5 个文件
+
     # ---- 主 entry point ----
 
     async def review(self, parsed_files: list[ParsedFile]) -> list[dict]:
