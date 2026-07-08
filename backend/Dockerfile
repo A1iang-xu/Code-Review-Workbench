@@ -13,9 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Python dependencies
+# Python dependencies — 先复制 pyproject.toml 并创建最小包结构以利用层缓存
+# pip install -e 需要源代码存在，Docker 中改用非可编辑安装
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
+RUN mkdir -p app && touch app/__init__.py && \
+    pip install --no-cache-dir . && \
+    rm -rf app
 
 # Copy app code
 COPY . .
