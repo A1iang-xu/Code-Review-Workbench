@@ -317,6 +317,17 @@ def _make_agent_review_node(
         context = _get_agent_context(state, agent_type=agent_type)
         agent = agent_cls(context)
         results, errors = await _run_agent_with_tracing(agent, agent_type, parsed_files)
+
+        # 从审查结果中提取协作信号
+        signals: list[dict] = []
+        try:
+            signals = await agent.emit_signals(results, parsed_files)
+        except Exception as e:
+            from app.utils.logger import get_logger
+            get_logger(__name__).warning(
+                "[Collaboration] %s 信号生成失败: %s", agent_type, e
+            )
+
         elapsed_ms = int((time.time() - start_time) * 1000)
         if task_id:
             update_progress(task_id, progress, "agent_reviews", "running")
@@ -324,6 +335,7 @@ def _make_agent_review_node(
             "current_stage": "agent_reviews",
             "progress": progress,
             results_key: results,
+            "agent_signals": signals,
             "errors": errors,
             "agent_durations": {agent_type: elapsed_ms},
         }
