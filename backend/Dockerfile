@@ -1,6 +1,8 @@
 # Code Review Workbench — Backend Dockerfile
 # Multi-stage pattern for smaller production images
-FROM python:3.12-slim
+# 使用 Python 3.11 而非 3.12：semgrep 的 PyPI wheel 仅支持 cp38-cp311，
+# 在 3.12 上 pip 会回退到 sdist 源码构建导致失败
+FROM python:3.11-slim
 
 WORKDIR /app
 
