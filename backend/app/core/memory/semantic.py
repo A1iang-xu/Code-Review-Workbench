@@ -107,21 +107,21 @@ class SemanticMemory:
     def add_rule(self, rule: dict[str, Any]) -> None:
         """添加审查规则到内存缓存和 PostgreSQL。"""
         if "timestamp" not in rule:
-            rule["timestamp"] = datetime.datetime.utcnow().isoformat()
+            rule["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._rules.append(rule)
         self._persist_async("rule", rule)
 
     def add_pattern(self, pattern: dict[str, Any]) -> None:
         """添加代码模式（正例或反例）。"""
         if "timestamp" not in pattern:
-            pattern["timestamp"] = datetime.datetime.utcnow().isoformat()
+            pattern["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._patterns.append(pattern)
         self._persist_async("pattern", pattern)
 
     def add_best_practice(self, practice: dict[str, Any]) -> None:
         """添加最佳实践。"""
         if "timestamp" not in practice:
-            practice["timestamp"] = datetime.datetime.utcnow().isoformat()
+            practice["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._best_practices.append(practice)
         self._persist_async("best_practice", practice)
 

@@ -75,7 +75,7 @@ class ProceduralMemory:
             suggestion: 修复建议
             severity: 严重等级
         """
-        now = datetime.datetime.utcnow().isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         if issue_type not in self._findings:
             self._findings[issue_type] = {

@@ -75,7 +75,7 @@ class EpisodicMemory:
 
         episode_data = {
             "task_id": task_id,
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "summary": summary,
             "key_facts": key_facts,
             "score": review_result.get("score", 0.0),

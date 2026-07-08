@@ -64,7 +64,7 @@ def update_progress(task_id: str, progress: float, stage: str, status: str = "ru
     }
     rds = _get_redis()
     if rds is not None:
-        rds.setex(_PROGRESS_KEY.format(task_id=task_id), _PROGRESS_TTL, json.dumps(data))
+        rds.set(_PROGRESS_KEY.format(task_id=task_id), json.dumps(data), ex=_PROGRESS_TTL)
     # 同时写入内存（降级 + SSE 快速读取）
     _progress_store[task_id] = data
 
@@ -79,7 +79,7 @@ def complete_progress(task_id: str):
     }
     rds = _get_redis()
     if rds is not None:
-        rds.setex(_PROGRESS_KEY.format(task_id=task_id), _PROGRESS_TTL, json.dumps(data))
+        rds.set(_PROGRESS_KEY.format(task_id=task_id), json.dumps(data), ex=_PROGRESS_TTL)
     _progress_store[task_id] = data
 
 
@@ -96,7 +96,7 @@ def fail_progress(task_id: str, error: str):
     }
     rds = _get_redis()
     if rds is not None:
-        rds.setex(_PROGRESS_KEY.format(task_id=task_id), _PROGRESS_TTL, json.dumps(data))
+        rds.set(_PROGRESS_KEY.format(task_id=task_id), json.dumps(data), ex=_PROGRESS_TTL)
     _progress_store[task_id] = data
 
 
