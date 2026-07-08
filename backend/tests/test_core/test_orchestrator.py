@@ -200,3 +200,64 @@ class TestReviewStateCollaborationFields:
         assert "collaboration_enabled" in hints
         assert "collaboration_round" in hints
         assert "active_collab_agents" in hints
+
+
+class TestSignalExchangeNode:
+    """signal_exchange_node 测试。"""
+
+    @pytest.mark.asyncio
+    async def test_disabled_collaboration_skips(self):
+        """collaboration_enabled=False 时返回空 active 列表。"""
+        from app.core.orchestrator import signal_exchange_node
+        state = {
+            "task_id": "",
+            "collaboration_enabled": False,
+            "agent_signals": [{"target_agent": "security"}],
+        }
+        result = await signal_exchange_node(state)
+        assert result["active_collab_agents"] == []
+
+    @pytest.mark.asyncio
+    async def test_no_signals_skips(self):
+        """无信号时返回空 active 列表。"""
+        from app.core.orchestrator import signal_exchange_node
+        state = {
+            "task_id": "",
+            "collaboration_enabled": True,
+            "agent_signals": [],
+        }
+        result = await signal_exchange_node(state)
+        assert result["active_collab_agents"] == []
+
+    @pytest.mark.asyncio
+    async def test_groups_signals_by_target(self):
+        """按 target_agent 分组计算 active 列表。"""
+        from app.core.orchestrator import signal_exchange_node
+        state = {
+            "task_id": "",
+            "collaboration_enabled": True,
+            "agent_signals": [
+                {"target_agent": "security", "source_agent": "architecture"},
+                {"target_agent": "security", "source_agent": "performance"},
+                {"target_agent": "refactor", "source_agent": "security"},
+            ],
+        }
+        result = await signal_exchange_node(state)
+        assert set(result["active_collab_agents"]) == {"security", "refactor"}
+
+
+class TestCollabNodeSkipLogic:
+    """collab 节点跳过逻辑测试。"""
+
+    @pytest.mark.asyncio
+    async def test_collab_node_skips_when_not_active(self):
+        """agent 不在 active 列表时返回空 dict。"""
+        from app.core.orchestrator import _make_collab_review_node
+        node = _make_collab_review_node("security", MagicMock)
+        state = {
+            "task_id": "",
+            "active_collab_agents": ["refactor"],  # security 不在里面
+            "agent_signals": [],
+        }
+        result = await node(state)
+        assert result == {}

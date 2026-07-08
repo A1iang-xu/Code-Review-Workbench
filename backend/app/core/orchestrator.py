@@ -350,6 +350,122 @@ refactor_review_node = _make_agent_review_node(
 )
 
 
+# ============================================================
+# Agent 协作节点（第二轮）
+# ============================================================
+
+async def signal_exchange_node(state: ReviewState) -> dict[str, Any]:
+    """信号交换节点。
+
+    汇聚第一轮 Agent 的 signals，按 target_agent 分组统计，
+    计算需要触发的第二轮 collab 节点列表。
+    """
+    start_time = time.time()
+    task_id = state.get("task_id", "")
+
+    collaboration_enabled = state.get("collaboration_enabled", True)
+    all_signals = state.get("agent_signals", [])
+
+    # 协作被禁用 或 无信号 → 不触发第二轮
+    if not collaboration_enabled or not all_signals:
+        if task_id:
+            update_progress(task_id, 0.7, "arbitrate", "running")
+        return {
+            "current_stage": "arbitrate",
+            "progress": 0.7,
+            "collaboration_round": 1,
+            "active_collab_agents": [],
+        }
+
+    # 按 target_agent 分组统计
+    signals_by_target: dict[str, list[dict]] = {}
+    for sig in all_signals:
+        target = sig.get("target_agent", "")
+        if target:
+            signals_by_target.setdefault(target, []).append(sig)
+
+    active_agents = list(signals_by_target.keys())
+
+    from app.utils.logger import get_logger
+    logger = get_logger(__name__)
+    logger.info(
+        "[Collaboration] 信号交换完成: %d 个信号, 触发 %d 个协作 Agent: %s",
+        len(all_signals), len(active_agents), active_agents,
+    )
+
+    elapsed_ms = int((time.time() - start_time) * 1000)
+    if task_id:
+        update_progress(task_id, 0.68, "collaboration", "running")
+
+    return {
+        "current_stage": "collaboration",
+        "progress": 0.68,
+        "collaboration_round": 1,
+        "active_collab_agents": active_agents,
+        "agent_durations": {"signal_exchange": elapsed_ms},
+    }
+
+
+def _make_collab_review_node(agent_type: str, agent_cls: type):
+    """工厂：生成第二轮协作复查节点。"""
+    async def _node(state: ReviewState) -> dict[str, Any]:
+        start_time = time.time()
+        task_id = state.get("task_id", "")
+
+        # 检查是否需要执行
+        active_agents = state.get("active_collab_agents", [])
+        if agent_type not in active_agents:
+            return {}
+
+        # 从 ReviewState.agent_signals 过滤出发给自己的信号
+        all_signals = state.get("agent_signals", [])
+        my_signals = [
+            sig for sig in all_signals
+            if sig.get("target_agent") == agent_type
+        ]
+
+        if not my_signals:
+            return {}
+
+        parsed_files = state.get("_parsed_files", [])
+        context = _get_agent_context(state, agent_type=agent_type)
+        agent = agent_cls(context)
+
+        try:
+            collab_findings = await agent.collaborative_review(
+                parsed_files=parsed_files,
+                signals=my_signals,
+            )
+        except Exception as e:
+            collab_findings = []
+            from app.utils.logger import get_logger
+            get_logger(__name__).warning(
+                "[Collaboration] %s 协作复查失败: %s", agent_type, e
+            )
+
+        # 标记来源
+        for f in collab_findings:
+            f["source"] = "collaboration"
+            f["triggered_by"] = agent_type
+
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        return {
+            "collaboration_results": collab_findings,
+            "agent_durations": {f"collab_{agent_type}": elapsed_ms},
+        }
+
+    _node.__name__ = f"collab_{agent_type}_node"
+    return _node
+
+
+# 生成 5 个 collab 节点
+collab_style_node = _make_collab_review_node("style", StyleCheckerAgent)
+collab_security_node = _make_collab_review_node("security", SecurityAuditorAgent)
+collab_architecture_node = _make_collab_review_node("architecture", ArchitectureAnalyzerAgent)
+collab_performance_node = _make_collab_review_node("performance", PerformanceProfilerAgent)
+collab_refactor_node = _make_collab_review_node("refactor", RefactorAdvisorAgent)
+
+
 async def arbitrate_node(state: ReviewState) -> dict[str, Any]:
     """仲裁汇总节点。"""
     start_time = time.time()
