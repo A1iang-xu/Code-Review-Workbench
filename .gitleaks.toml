@@ -1,0 +1,22 @@
+# gitleaks 配置 — allowlist 测试用 fixture
+#
+# 本仓库为"代码安全审查"工具，测试用例和验收样本中包含故意硬编码的
+# 假 API key（sk-proj-abc123...）用于验证 Security Agent 的检测能力。
+# 这些 key 是虚构的，不属于任何真实账号，将其加入 allowlist 以避免
+# gitleaks 误报阻断 CI。
+
+title = "Code Review Workbench gitleaks config"
+
+[allowlist]
+description = "允许测试用 fixture 中的虚构 API key 和相关测试目录"
+# 虚构的测试 key（不指向任何真实账号）
+regexes = [
+  '''sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz''',
+]
+# 测试 fixture / 验收样本目录：内容用于验证检测能力，必然包含"问题代码"
+paths = [
+  '''^acceptance_samples/.*''',
+  '''^backend/tests/.*''',
+  '''^test_sample\.py$''',
+  '''^docs/.*''',
+]
