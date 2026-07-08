@@ -26,11 +26,9 @@ def upgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_semantic_memories_embedding")
     # 调整向量列维度（现有数据为 NULL，无需 USING 转换）
     op.execute("ALTER TABLE semantic_memories ALTER COLUMN embedding TYPE vector(2048)")
-    # 重建向量索引 — ivfflat 最多支持 2000 维，2048 维需使用 HNSW 索引
-    op.execute(
-        "CREATE INDEX ix_semantic_memories_embedding ON semantic_memories "
-        "USING hnsw (embedding vector_cosine_ops)"
-    )
+    # pgvector 索引（ivfflat/hnsw）最多支持 2000 维，2048 维无法创建索引。
+    # 记忆系统数据量较小（百到千条），顺序扫描性能可接受。
+    # 如需索引性能，可改用 halfvec 类型或将维度降到 2000。
 
 
 def downgrade() -> None:
